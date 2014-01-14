@@ -1,0 +1,45 @@
+<package>
+  <name>lcsr_controllers</name>
+  <version>0.1.0</version>
+  <license>BSD</license>
+  <maintainer email="jbo@jhu.edu">Jonathan Bohren</maintainer>
+  <author email="jbo@jhu.edu">Jonathan Bohren</author>
+  <description>
+    Get yourself under control, man.
+  </description>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <build_depend>rtt</build_depend>
+  <build_depend>ocl</build_depend>
+  <build_depend>kdl</build_depend>
+  <build_depend>eigen</build_depend>
+
+  <build_depend>rtt_ros</build_depend>
+  <build_depend>rtt_ros_tools</build_depend>
+  <build_depend>rtt_sensor_msgs</build_depend>
+  <build_depend>kdl_typekit</build_depend>
+  <build_depend>kdl_parser</build_depend>
+  <build_depend>kdl_urdf_tools</build_depend>
+  <build_depend>eigen_typekit</build_depend>
+  
+  <run_depend>rtt</run_depend>
+  <run_depend>ocl</run_depend>
+  <run_depend>kdl</run_depend>
+
+  <run_depend>rtt_ros</run_depend>
+  <run_depend>rtt_ros_tools</run_depend>
+  <run_depend>rtt_sensor_msgs</run_depend>
+  <run_depend>kdl_typekit</run_depend>
+  <run_depend>kdl_parser</run_depend>
+  <run_depend>kdl_urdf_tools</run_depend>
+  <run_depend>eigen_typekit</run_depend>
+
+  <export>
+    <rtt_ros>
+      <plugin_depend>kdl_typekit</plugin_depend>
+      <plugin_depend>eigen_typekit</plugin_depend>
+      <plugin_depend>rtt_sensor_msgs</plugin_depend>
+    </rtt_ros>
+  </export>
+</package>

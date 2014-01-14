@@ -1,0 +1,7 @@
+# A list of joint names to calibrate simultaneously
+string[] joints_to_calibrate
+# A vector of joint positions for the calibrated joints to
+# go to before calibration is performed
+float64[] calibration_posture
+---
+bool ok
