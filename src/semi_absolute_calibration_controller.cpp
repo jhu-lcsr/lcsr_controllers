@@ -47,19 +47,6 @@ SemiAbsoluteCalibrationController::SemiAbsoluteCalibrationController(std::string
       &SemiAbsoluteCalibrationController::calibrate_cb,
       this,RTT::OwnThread);
 
-  // ROS parameters
-  boost::shared_ptr<rtt_rosparam::ROSParam> rosparam =
-    this->getProvider<rtt_rosparam::ROSParam>("rosparam");
-  rosparam->getAbsolute("robot_description");
-  rosparam->getComponentPrivate("root_link");
-  rosparam->getComponentPrivate("tip_link");
-  rosparam->getComponentPrivate("upper_limits");
-  rosparam->getComponentPrivate("lower_limits");
-  rosparam->getComponentPrivate("limit_search_directions");
-  rosparam->getComponentPrivate("home_positions");
-  rosparam->getComponentPrivate("resolver_offsets_at_home");
-  rosparam->getRelative("resolver_ranges");
-
   // Configure data ports
   this->ports()->addPort("joint_position_in", joint_position_in_);
   this->ports()->addPort("resolver_offset_in", resolver_offset_in_);
@@ -77,6 +64,19 @@ SemiAbsoluteCalibrationController::SemiAbsoluteCalibrationController(std::string
 
 bool SemiAbsoluteCalibrationController::configureHook()
 {
+  // ROS parameters
+  boost::shared_ptr<rtt_rosparam::ROSParam> rosparam =
+    this->getProvider<rtt_rosparam::ROSParam>("rosparam");
+  rosparam->getAbsolute("robot_description");
+  rosparam->getComponentPrivate("root_link");
+  rosparam->getComponentPrivate("tip_link");
+  rosparam->getComponentPrivate("upper_limits");
+  rosparam->getComponentPrivate("lower_limits");
+  rosparam->getComponentPrivate("limit_search_directions");
+  rosparam->getComponentPrivate("home_positions");
+  rosparam->getComponentPrivate("resolver_offsets_at_home");
+  rosparam->getRelative("resolver_ranges");
+
   // Initialize kinematics (KDL tree, KDL chain, and #DOF)
   urdf::Model urdf_model;
   if(!kdl_urdf_tools::initialize_kinematics_from_urdf(

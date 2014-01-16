@@ -13,6 +13,8 @@
 #include <kdl/chain.hpp>
 #include <kdl/velocityprofile_trap.hpp>
 
+#include <trajectory_msgs/JointTrajectoryPoint.h>
+
 #include <conman/hook.h>
 
 namespace lcsr_controllers {
@@ -30,9 +32,11 @@ namespace lcsr_controllers {
     // RTT Ports
     RTT::InputPort<Eigen::VectorXd> joint_position_in_;
     RTT::InputPort<Eigen::VectorXd> joint_velocity_in_;
-    RTT::InputPort<Eigen::VectorXd> joint_position_cmd_in_;
+    RTT::InputPort<Eigen::VectorXd> joint_position_cmd_eig_in_;
     RTT::OutputPort<Eigen::VectorXd> joint_position_out_;
     RTT::OutputPort<Eigen::VectorXd> joint_velocity_out_;
+
+    RTT::InputPort<trajectory_msgs::JointTrajectoryPoint> joint_position_cmd_ros_in_;
 
   public:
     JointTrajGeneratorKDL(std::string const& name);
@@ -62,6 +66,8 @@ namespace lcsr_controllers {
       joint_velocity_,
       joint_velocity_raw_,
       joint_velocity_sample_;
+
+    trajectory_msgs::JointTrajectoryPoint joint_position_cmd_ros_;
 
     bool has_last_position_data_;
 

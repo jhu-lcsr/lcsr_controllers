@@ -36,20 +36,6 @@ JointPIDController::JointPIDController(std::string const& name) :
   this->addProperty("i_clamps",i_clamps_).doc("Integral clamps.");
   this->addProperty("velocity_smoothing_factor",velocity_smoothing_factor_).doc("Exponential smoothing factor to use when estimating veolocity from finite differences.");
   
-  // ROS parameters
-  boost::shared_ptr<rtt_rosparam::ROSParam> rosparam =
-    this->getProvider<rtt_rosparam::ROSParam>("rosparam");
-  // Get absoluate parameters
-  rosparam->getAbsolute("robot_description");
-  // Get private parameters
-  rosparam->getComponentPrivate("root_link");
-  rosparam->getComponentPrivate("tip_link");
-  rosparam->getComponentPrivate("p_gains");
-  rosparam->getComponentPrivate("i_gains");
-  rosparam->getComponentPrivate("d_gains");
-  rosparam->getComponentPrivate("i_clamps");
-  rosparam->getComponentPrivate("velocity_smoothing_factor");
-
   // Configure data ports
   this->ports()->addPort("joint_position_in", joint_position_in_);
   this->ports()->addPort("joint_velocity_in", joint_velocity_in_);
@@ -70,13 +56,27 @@ JointPIDController::JointPIDController(std::string const& name) :
 
 bool JointPIDController::configureHook()
 {
+  // ROS parameters
+  boost::shared_ptr<rtt_rosparam::ROSParam> rosparam =
+    this->getProvider<rtt_rosparam::ROSParam>("rosparam");
+  // Get absoluate parameters
+  rosparam->getAbsolute("robot_description");
+  // Get private parameters
+  rosparam->getComponentPrivate("root_link");
+  rosparam->getComponentPrivate("tip_link");
+  rosparam->getComponentPrivate("p_gains");
+  rosparam->getComponentPrivate("i_gains");
+  rosparam->getComponentPrivate("d_gains");
+  rosparam->getComponentPrivate("i_clamps");
+  rosparam->getComponentPrivate("velocity_smoothing_factor");
+
   // Initialize kinematics (KDL tree, KDL chain, and #DOF)
   urdf::Model urdf_model;
   if(!kdl_urdf_tools::initialize_kinematics_from_urdf(
         robot_description_, root_link_, tip_link_,
         n_dof_, kdl_chain_, kdl_tree_, urdf_model))
   {
-    RTT::log(RTT::Error) << "Could not initialize robot kinematics!" << RTT::endlog();
+    RTT::log(RTT::Error) << "Could not initialize robot kinematics with root: \"" <<root_link_<< "\" and tip: \"" <<tip_link_<< "\"" << RTT::endlog();
     return false;
   }
 
@@ -167,8 +167,6 @@ void JointPIDController::updateHook()
 
 void JointPIDController::stopHook()
 {
-  joint_effort_.setZero();
-  joint_effort_out_.write(joint_effort_);
 }
 
 void JointPIDController::cleanupHook()

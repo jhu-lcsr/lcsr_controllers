@@ -4,11 +4,14 @@
 
 #include <Eigen/Dense>
 
+#include <rtt/internal/GlobalService.hpp>
+
 #include <kdl/tree.hpp>
 
 #include <kdl_parser/kdl_parser.hpp>
 
 #include <rtt_rosparam/rosparam.h>
+#include <rtt_rostopic/rostopic.h>
 
 #include <kdl_urdf_tools/tools.h>
 #include "joint_traj_generator_kdl.h"
@@ -34,6 +37,32 @@ JointTrajGeneratorKDL::JointTrajGeneratorKDL(std::string const& name) :
   this->addProperty("trap_max_accs",trap_max_accs_).doc("Maximum acceperations for trap generation.");
   this->addProperty("velocity_smoothing_factor",velocity_smoothing_factor_).doc("Exponential smoothing factor to use when estimating veolocity from finite differences.");
   
+  // Configure data ports
+  this->ports()->addPort("joint_position_in", joint_position_in_);
+  this->ports()->addPort("joint_velocity_in", joint_velocity_in_);
+  this->ports()->addPort("joint_position_cmd_in", joint_position_cmd_eig_in_);
+  this->ports()->addPort("joint_position_out", joint_position_out_)
+    .doc("Output port: nx1 vector of joint positions. (n joints)");
+  this->ports()->addPort("joint_velocity_out", joint_velocity_out_)
+    .doc("Output port: nx1 vector of joint velocities. (n joints)");
+
+  // ROS ports
+  rtt_rostopic::ROSTopic rostopic(NULL);
+  rostopic.connectTo(RTT::internal::GlobalService::Instance()->provides("rostopic"));
+
+  this->ports()->addPort("joint_position_cmd_ros_in", joint_position_cmd_ros_in_);
+  joint_position_cmd_ros_in_.createStream(rostopic.connection("~" + this->getName() + "/joint_position_cmd"));
+
+  // Load Conman interface
+  conman_hook_ = conman::Hook::GetHook(this);
+  conman_hook_->setInputExclusivity("joint_position_in", conman::Exclusivity::EXCLUSIVE);
+  conman_hook_->setInputExclusivity("joint_velocity_in", conman::Exclusivity::EXCLUSIVE);
+  conman_hook_->setInputExclusivity("joint_position_cmd_in", conman::Exclusivity::EXCLUSIVE);
+  conman_hook_->setInputExclusivity("joint_position_cmd_ros_in", conman::Exclusivity::EXCLUSIVE);
+}
+
+bool JointTrajGeneratorKDL::configureHook()
+{
   // ROS parameters
   boost::shared_ptr<rtt_rosparam::ROSParam> rosparam =
     this->getProvider<rtt_rosparam::ROSParam>("rosparam");
@@ -44,26 +73,6 @@ JointTrajGeneratorKDL::JointTrajGeneratorKDL(std::string const& name) :
   rosparam->getComponentPrivate("trap_max_accs");
   rosparam->getComponentPrivate("velocity_smoothing_factor");
 
-  // Configure data ports
-  this->ports()->addPort("joint_position_in", joint_position_in_);
-  this->ports()->addPort("joint_velocity_in", joint_velocity_in_);
-  this->ports()->addPort("joint_position_cmd_in", joint_position_cmd_in_);
-  this->ports()->addPort("joint_position_out", joint_position_out_)
-    .doc("Output port: nx1 vector of joint positions. (n joints)");
-  this->ports()->addPort("joint_velocity_out", joint_velocity_out_)
-    .doc("Output port: nx1 vector of joint velocities. (n joints)");
-
-  // ROS ports
-
-  // Load Conman interface
-  conman_hook_ = conman::Hook::GetHook(this);
-  conman_hook_->setInputExclusivity("joint_position_in", conman::Exclusivity::EXCLUSIVE);
-  conman_hook_->setInputExclusivity("joint_velocity_in", conman::Exclusivity::EXCLUSIVE);
-  conman_hook_->setInputExclusivity("joint_position_cmd_in", conman::Exclusivity::EXCLUSIVE);
-}
-
-bool JointTrajGeneratorKDL::configureHook()
-{
   // Initialize kinematics (KDL tree, KDL chain, and #DOF)
   urdf::Model urdf_model;
   if(!kdl_urdf_tools::initialize_kinematics_from_urdf(
@@ -86,6 +95,9 @@ bool JointTrajGeneratorKDL::configureHook()
   trajectory_start_times_.resize(n_dof_);
   trajectory_end_times_.resize(n_dof_);
   
+  trap_max_vels_.resize(n_dof_);
+  trap_max_accs_.resize(n_dof_);
+
   // Create trajectory generators
   trajectories_.resize(n_dof_);
   for(unsigned i=0; i<n_dof_; i++){
@@ -93,10 +105,6 @@ bool JointTrajGeneratorKDL::configureHook()
     trajectory_end_times_[i] = 0.0;
     trajectories_[i] = KDL::VelocityProfile_Trap(trap_max_vels_[i], trap_max_accs_[i]);
   }
-
-  // Prepare ports for realtime processing
-  joint_position_out_.setDataSample(joint_position_sample_);
-  joint_velocity_out_.setDataSample(joint_velocity_sample_);
 
   return true;
 }
@@ -139,10 +147,19 @@ void JointTrajGeneratorKDL::updateHook()
     }
 
     // Read in any newly commanded joint positions 
-    if(joint_position_cmd_in_.readNewest( joint_position_cmd_ ) == RTT::NoData) {
+    bool rtt_cmd = joint_position_cmd_eig_in_.readNewest( joint_position_cmd_ );
+    bool ros_cmd = joint_position_cmd_ros_in_.readNewest( joint_position_cmd_ros_ );
+
+    if(rtt_cmd == RTT::NoData && ros_cmd == RTT::NoData) {
       // Do nothing if we don't have any desired positions
       return;
     } else {
+      // ROS command overrides RTT command if it's new
+      if(ros_cmd == RTT::NewData && rtt_cmd != RTT::NewData) {
+        joint_position_cmd_ = Eigen::VectorXd::Map(
+            joint_position_cmd_ros_.positions.data(),
+            joint_position_cmd_ros_.positions.size());
+      }
       for(unsigned i=0; i<n_dof_; i++) {
         // Check to make sure the last trajectory has completed in this degree-of-freedom
         if(time > trajectory_end_times_[i]) {
