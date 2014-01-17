@@ -64,11 +64,6 @@ bool JointPIDController::configureHook()
   // Get private parameters
   rosparam->getComponentPrivate("root_link");
   rosparam->getComponentPrivate("tip_link");
-  rosparam->getComponentPrivate("p_gains");
-  rosparam->getComponentPrivate("i_gains");
-  rosparam->getComponentPrivate("d_gains");
-  rosparam->getComponentPrivate("i_clamps");
-  rosparam->getComponentPrivate("velocity_smoothing_factor");
 
   // Initialize kinematics (KDL tree, KDL chain, and #DOF)
   urdf::Model urdf_model;
@@ -81,9 +76,29 @@ bool JointPIDController::configureHook()
   }
 
   // Resize IO vectors
+  joint_position_cmd_.resize(n_dof_);
+  joint_velocity_cmd_.resize(n_dof_);
   joint_position_.resize(n_dof_);
   joint_velocity_.resize(n_dof_);
   joint_effort_.resize(n_dof_);
+  joint_p_error_.resize(n_dof_);
+  joint_i_error_.resize(n_dof_);
+  joint_d_error_.resize(n_dof_);
+  p_gains_.resize(n_dof_);
+  i_gains_.resize(n_dof_);
+  d_gains_.resize(n_dof_);
+  i_clamps_.resize(n_dof_);
+
+  p_gains_.setZero();
+  i_gains_.setZero();
+  d_gains_.setZero();
+  i_clamps_.setZero();
+
+  rosparam->getComponentPrivate("p_gains");
+  rosparam->getComponentPrivate("i_gains");
+  rosparam->getComponentPrivate("d_gains");
+  rosparam->getComponentPrivate("i_clamps");
+  rosparam->getComponentPrivate("velocity_smoothing_factor");
 
   // Prepare ports for realtime processing
   joint_effort_out_.setDataSample(joint_effort_);
@@ -104,6 +119,8 @@ bool JointPIDController::startHook()
   // Reset the last position flag
   has_last_position_data_ = false;
 
+  // TODO: Check sizes of all vectors
+
   return true;
 }
 
@@ -116,18 +133,24 @@ void JointPIDController::updateHook()
     period = conman_hook_->getPeriod();
 
   // Read in the current joint positions & velocities
-  bool new_position_data = (joint_position_in_.readNewest(joint_position_) == RTT::NewData);
-  bool new_velocity_data = (joint_velocity_in_.readNewest(joint_velocity_raw_) == RTT::NewData);
+  Eigen::VectorXd pos, vel;
+
+  RTT::FlowStatus 
+    pos_status = joint_position_in_.readNewest( pos ), 
+    vel_status = joint_velocity_in_.readNewest( vel );
+
+  if(pos_status == RTT::NewData && pos.size() == n_dof_ ) { joint_position_ = pos; }
+  if(vel_status == RTT::NewData && vel.size() == n_dof_ ) { joint_velocity_raw_ = vel; }
 
   // If we don't get any position update, we don't write any new data to the ports
-  if(!new_position_data) {
+  if(pos_status != RTT::NewData) {
     return;
   }
 
   // Check the minimum requirements to compute the control command
-  if(new_velocity_data || has_last_position_data_) {
+  if(vel_status == RTT::NewData || has_last_position_data_) {
     // Trust a supplied velocity, or compute it from an exponentially-smothed finite difference
-    if(new_velocity_data) {
+    if(vel_status == RTT::NewData) {
       // Trust the velocity input
       joint_velocity_ = joint_velocity_raw_;
     } else {
@@ -139,8 +162,15 @@ void JointPIDController::updateHook()
 
     // Read in the current commanded joint positions and velocities
     // These commands can be sparse and not return new information each update tick
-    joint_position_cmd_in_.readNewest( joint_position_ );
-    joint_velocity_cmd_in_.readNewest( joint_velocity_ );
+    Eigen::VectorXd pos, vel;
+    RTT::FlowStatus 
+      pos_cmd_status = joint_position_cmd_in_.readNewest( pos ), 
+      vel_cmd_status = joint_velocity_cmd_in_.readNewest( vel );
+
+    if(pos_cmd_status == RTT::NewData && pos.size() == n_dof_ ) { joint_position_cmd_ = pos; }
+    else if(pos_cmd_status == RTT::NoData) { joint_position_cmd_ = joint_position_; }
+    if(vel_cmd_status == RTT::NewData && vel.size() == n_dof_ ) { joint_velocity_cmd_ = vel; }
+    else if(vel_cmd_status == RTT::NoData) { joint_velocity_cmd_.setZero(); }
 
     joint_p_error_ = joint_position_cmd_ - joint_position_;
     joint_d_error_ = joint_velocity_cmd_ - joint_velocity_;
