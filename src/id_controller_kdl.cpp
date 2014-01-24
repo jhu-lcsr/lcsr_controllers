@@ -22,7 +22,7 @@ IDControllerKDL::IDControllerKDL(std::string const& name) :
   ,robot_description_("")
   ,root_link_("")
   ,tip_link_("")
-  ,gravity_(3,0.0)
+  ,gravity_(3)
   // Working variables
   ,n_dof_(0)
   ,kdl_tree_()
@@ -33,6 +33,9 @@ IDControllerKDL::IDControllerKDL(std::string const& name) :
   ,accelerations_()
   ,torques_()
 {
+  // Zero gravity
+  gravity_.setZero();
+    
   // Declare properties
   this->addProperty("robot_description",robot_description_)
     .doc("The WAM URDF xml string.");
@@ -47,24 +50,21 @@ IDControllerKDL::IDControllerKDL(std::string const& name) :
   // Configure data ports
   this->ports()->addPort("joint_position_in", joint_position_in_);
   this->ports()->addPort("joint_velocity_in", joint_velocity_in_);
-  this->ports()->addPort("end_effector_cg_in", end_effector_cg_in_);
+  this->ports()->addPort("end_effector_masses_in", end_effector_masses_in_)
+    .doc("Additional masses rigidly attached to the end-effector. Given as (x,y,z,m) in the coordinate frame given by the tip_link property of this component");
   this->ports()->addPort("joint_effort_out", joint_effort_out_)
     .doc("Output port: nx1 vector of joint torques. (n joints)");
-  
-  // Initialize properties from rosparam
 }
 
 bool IDControllerKDL::configureHook()
 {
   // ROS parameters
-  boost::shared_ptr<rtt_rosparam::ROSParam> rosparam =
-    this->getProvider<rtt_rosparam::ROSParam>("rosparam");
+  boost::shared_ptr<rtt_rosparam::ROSParam> rosparam = this->getProvider<rtt_rosparam::ROSParam>("rosparam");
   // Get absoluate parameters
   rosparam->getAbsolute("robot_description");
   // Get private parameters
   rosparam->getComponentPrivate("root_link");
   rosparam->getComponentPrivate("tip_link");
-  rosparam->getComponentPrivate("wrench_link");
   rosparam->getComponentPrivate("gravity");
 
   RTT::log(RTT::Debug) << "Initializing kinematic and dynamic parameters from \"" << root_link_ << "\" to \"" << tip_link_ <<"\"" << RTT::endlog();
@@ -84,6 +84,9 @@ bool IDControllerKDL::configureHook()
       new KDL::ChainIdSolver_RNE(
         kdl_chain_,
         KDL::Vector(gravity_[0],gravity_[1],gravity_[2])));
+
+  // Create the forward kinematics solver
+  fk_solver_.reset( new KDL::ChainFkSolverPos_recursive( kdl_chain_ ) );
 
   // Resize IO vectors
   joint_position_.resize(n_dof_);
@@ -118,20 +121,55 @@ void IDControllerKDL::updateHook()
   // Read in the current joint positions & velocities
   bool new_pos_data = joint_position_in_.readNewest( joint_position_ ) == RTT::NewData;
   bool new_vel_data = joint_velocity_in_.readNewest( joint_velocity_ ) == RTT::NewData;
-  bool new_ee_data = end_effector_cg_in_.readNewest( end_effector_cg_ ) == RTT::NewData;
 
+  // Read all the EE masses
+  bool new_ee_data = false;
+
+  double ee_mass = 0;
+  KDL::Vector ee_cog(0,0,0);
+
+  while(end_effector_masses_in_.read( end_effector_mass_ ) == RTT::NewData) 
+  {
+    // Make sure the new mass is well-posed
+    if(end_effector_mass_.size() == 4 && end_effector_mass_[3] > 1E-4) 
+    {
+      // Update EE cog
+      KDL::Vector new_cog(end_effector_mass_[0], end_effector_mass_[1], end_effector_mass_[2]);
+      double new_mass = end_effector_mass_[3];
+      ee_cog = (ee_cog*ee_mass + new_cog*new_mass) / (ee_mass + new_mass);
+      // Update EE mass
+      ee_mass += new_mass;
+      new_ee_data = true;
+    }
+  }
+
+  // Update the ee inertia
   if(new_ee_data) {
-    // Compute the external wrench on the tip link assuming a 
-    // Set the wrench (in root_link_ coordinates)
-    ext_wrenches_.back();
-  } else { 
-    // Zero the last wrench
-    ext_wrenches_.back() = KDL::Wrench::Zero();
+    ee_inertia = KDL::RigidBodyInertia( ee_mass, ee_cog );  
   }
 
   if(new_pos_data && new_vel_data) {
+    // Get JntArray structures from pos/vel
     positions_.data = joint_position_;
     velocities_.data = joint_velocity_;
+
+    // Compute wwrenches on the end-effector
+    if(true) {
+      // Compute the tip frame from the current joint position
+      KDL::Frame tip_frame;
+      int ret = fk_solver_->JntToCart(positions_, tip_frame);
+      // Compute gravity in the tip frame
+      KDL::Vector tip_gravity = tip_frame.M * KDL::Vector(gravity_[0], gravity_[1], gravity_[2]);
+      KDL::Twist tip_gravity_twist(tip_gravity, KDL::Vector::Zero()); //TODO: Add centripetal acceleration (v*r^2)
+      // Transform the EE cog into the root_link_ frame (wrench/gravity frame)
+      ee_wrench = ee_inertia * tip_gravity_twist;
+      // Compute the external wrench on the tip link
+      // Set the wrench (in root_link_ coordinates)
+      ext_wrenches_.back() = ee_wrench;
+    } else { 
+      // Zero the last wrench
+      ext_wrenches_.back() = KDL::Wrench::Zero();
+    }
 
     // Compute inverse dynamics
     // This computes the torques on each joint of the arm as a function of

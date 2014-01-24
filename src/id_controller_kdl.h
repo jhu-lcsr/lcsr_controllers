@@ -12,6 +12,7 @@
 #include <kdl/tree.hpp>
 #include <kdl/chain.hpp>
 #include <kdl/chainidsolver_recursive_newton_euler.hpp>
+#include <kdl/chainfksolverpos_recursive.hpp>
 
 namespace lcsr_controllers {
   class IDControllerKDL : public RTT::TaskContext
@@ -21,13 +22,12 @@ namespace lcsr_controllers {
     std::string root_link_;
     std::string tip_link_;
     std::string wrench_link_;
-    std::vector<double> gravity_;
+    Eigen::VectorXd gravity_;
 
     // RTT Ports
     RTT::InputPort<Eigen::VectorXd> joint_position_in_;
     RTT::InputPort<Eigen::VectorXd> joint_velocity_in_;
-    //RTT::InputPort<Eigen::VectorXd> end_effector_wrench_in_;
-    RTT::InputPort<Eigen::VectorXd> end_effector_cg_in_;
+    RTT::InputPort<Eigen::VectorXd> end_effector_masses_in_;
     RTT::OutputPort<Eigen::VectorXd> joint_effort_out_;
 
   public:
@@ -40,12 +40,16 @@ namespace lcsr_controllers {
 
   private:
 
-    // Working variables
+    // Kinematic properties
     unsigned int n_dof_;
     KDL::Tree kdl_tree_;
     KDL::Chain kdl_chain_;
-    boost::scoped_ptr<KDL::ChainIdSolver_RNE> id_solver_;
 
+    // Solvers
+    boost::scoped_ptr<KDL::ChainIdSolver_RNE> id_solver_;
+    boost::scoped_ptr<KDL::ChainFkSolverPos_recursive> fk_solver_;
+
+    // Working variables
     KDL::JntArray positions_;
     KDL::JntArray velocities_;
     KDL::JntArray accelerations_;
@@ -56,8 +60,11 @@ namespace lcsr_controllers {
       joint_position_,
       joint_velocity_,
       joint_acceleration_,
-      end_effector_cg_,
+      end_effector_mass_,
       joint_effort_;
+
+    KDL::RigidBodyInertia ee_inertia;
+    KDL::Wrench ee_wrench;
 
   };
 }
