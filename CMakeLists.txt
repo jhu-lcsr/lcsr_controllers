@@ -12,11 +12,8 @@ find_package(catkin REQUIRED
   kdl_urdf_tools
   control_toolbox)
 
-find_package(OROCOS-RTT REQUIRED)
 find_package(Orocos-KDL REQUIRED)
 find_package(Eigen REQUIRED)
-
-include(${OROCOS-RTT_USE_FILE_PATH}/UseOROCOS-RTT.cmake )
 
 # Generate ROS messages
 add_message_files(FILES

@@ -10,6 +10,7 @@
 
 #include <kdl_parser/kdl_parser.hpp>
 
+#include <rtt_ros/time.h>
 #include <rtt_rosparam/rosparam.h>
 #include <rtt_rostopic/rostopic.h>
 
@@ -28,6 +29,7 @@ JointTrajGeneratorKDL::JointTrajGeneratorKDL(std::string const& name) :
   ,n_dof_(0)
   ,kdl_tree_()
   ,kdl_chain_()
+  ,ros_publish_throttle_(0.02)
 {
   // Declare properties
   this->addProperty("robot_description",robot_description_).doc("The WAM URDF xml string.");
@@ -35,6 +37,7 @@ JointTrajGeneratorKDL::JointTrajGeneratorKDL(std::string const& name) :
   this->addProperty("tip_link",tip_link_).doc("The tip link for the controller.");
   this->addProperty("trap_max_vels",trap_max_vels_).doc("Maximum velocities for trap generation.");
   this->addProperty("trap_max_accs",trap_max_accs_).doc("Maximum acceperations for trap generation.");
+  this->addProperty("position_tolerance",position_tolerance_).doc("Maximum position error.");
   this->addProperty("velocity_smoothing_factor",velocity_smoothing_factor_).doc("Exponential smoothing factor to use when estimating veolocity from finite differences.");
   
   // Configure data ports
@@ -47,11 +50,8 @@ JointTrajGeneratorKDL::JointTrajGeneratorKDL(std::string const& name) :
     .doc("Output port: nx1 vector of joint velocities. (n joints)");
 
   // ROS ports
-  rtt_rostopic::ROSTopic rostopic(NULL);
-  rostopic.connectTo(RTT::internal::GlobalService::Instance()->provides("rostopic"));
-
   this->ports()->addPort("joint_position_cmd_ros_in", joint_position_cmd_ros_in_);
-  joint_position_cmd_ros_in_.createStream(rostopic.connection("~" + this->getName() + "/joint_position_cmd"));
+  this->ports()->addPort("joint_state_desired_out", joint_state_desired_out_);
 
   // Load Conman interface
   conman_hook_ = conman::Hook::GetHook(this);
@@ -63,6 +63,22 @@ JointTrajGeneratorKDL::JointTrajGeneratorKDL(std::string const& name) :
 
 bool JointTrajGeneratorKDL::configureHook()
 {
+  // ROS topics
+  rtt_rostopic::ROSTopic rostopic;
+  if(rostopic.ready()) {
+    RTT::log(RTT::Info) << "ROS Topics ready..." <<RTT::endlog();
+  } else {
+    RTT::log(RTT::Error) << "ROS Topics not ready..." <<RTT::endlog();
+    return false;
+  }
+
+  if(!joint_position_cmd_ros_in_.createStream(rostopic.connection("~" + this->getName() + "/joint_position_cmd"))
+     || !joint_state_desired_out_.createStream(rostopic.connection("~" + this->getName() + "/joint_state_desired")))
+  {
+    RTT::log(RTT::Error) << "ROS Topics could not be streamed..." <<RTT::endlog();
+    return false;
+  }
+
   // ROS parameters
   boost::shared_ptr<rtt_rosparam::ROSParam> rosparam =
     this->getProvider<rtt_rosparam::ROSParam>("rosparam");
@@ -71,6 +87,7 @@ bool JointTrajGeneratorKDL::configureHook()
   rosparam->getComponentPrivate("tip_link");
   rosparam->getComponentPrivate("trap_max_vels");
   rosparam->getComponentPrivate("trap_max_accs");
+  rosparam->getComponentPrivate("position_tolerance");
   rosparam->getComponentPrivate("velocity_smoothing_factor");
 
   // Initialize kinematics (KDL tree, KDL chain, and #DOF)
@@ -95,6 +112,7 @@ bool JointTrajGeneratorKDL::configureHook()
   trajectory_start_times_.resize(n_dof_);
   trajectory_end_times_.resize(n_dof_);
   
+  position_tolerance_.resize(n_dof_);
   trap_max_vels_.resize(n_dof_);
   trap_max_accs_.resize(n_dof_);
 
@@ -147,15 +165,16 @@ void JointTrajGeneratorKDL::updateHook()
     }
 
     // Read in any newly commanded joint positions 
-    bool rtt_cmd = joint_position_cmd_eig_in_.readNewest( joint_position_cmd_ );
-    bool ros_cmd = joint_position_cmd_ros_in_.readNewest( joint_position_cmd_ros_ );
+    RTT::FlowStatus rtt_cmd = joint_position_cmd_eig_in_.readNewest( joint_position_cmd_ );
+    RTT::FlowStatus ros_cmd = joint_position_cmd_ros_in_.readNewest( joint_position_cmd_ros_ );
 
     if(rtt_cmd == RTT::NoData && ros_cmd == RTT::NoData) {
       // Do nothing if we don't have any desired positions
       return;
-    } else {
+    } else if(rtt_cmd == RTT::NewData || ros_cmd == RTT::NewData) {
       // ROS command overrides RTT command if it's new
       if(ros_cmd == RTT::NewData && rtt_cmd != RTT::NewData) {
+        RTT::log(RTT::Debug) << "New ROS trajectory point" << RTT::endlog();
         joint_position_cmd_ = Eigen::VectorXd::Map(
             joint_position_cmd_ros_.positions.data(),
             joint_position_cmd_ros_.positions.size());
@@ -175,13 +194,37 @@ void JointTrajGeneratorKDL::updateHook()
 
     // Sample the trajectory
     for(unsigned i=0; i<n_dof_; i++) {
-      joint_position_sample_[i] = trajectories_[i].Pos(time - trajectory_start_times_[i]);
-      joint_velocity_sample_[i] = trajectories_[i].Vel(time - trajectory_start_times_[i]);
+      // Set final position commands
+      if(time > trajectory_end_times_[i]) {
+        joint_position_sample_[i] = joint_position_cmd_[i];
+        joint_velocity_sample_[i] = 0.0;
+      } else {
+        joint_position_sample_[i] = trajectories_[i].Pos(time - trajectory_start_times_[i]);
+        joint_velocity_sample_[i] = trajectories_[i].Vel(time - trajectory_start_times_[i]);
+      }
+
+      // Check tolerance
+      if(fabs(joint_position_sample_[i] - joint_position_[i]) > position_tolerance_[i]) {
+        //RTT::log(RTT::Debug) << "Exceeded tolerance in joint: "<<i << RTT::endlog();
+        trajectories_[i].SetProfile(joint_position_[i], joint_position_cmd_[i]);
+        trajectory_start_times_[i] = time;
+        trajectory_end_times_[i] = trajectory_start_times_[i] + trajectories_[i].Duration();
+      }
     }
 
     // Send instantaneous joint position and velocity commands
     joint_position_out_.write(joint_position_sample_);
     joint_velocity_out_.write(joint_velocity_sample_);
+
+    // Publish debug traj to ros
+    if(ros_publish_throttle_.ready()) {
+      joint_state_desired_.header.stamp = rtt_ros::time::RTNow();
+      joint_state_desired_.position.resize(n_dof_);
+      joint_state_desired_.velocity.resize(n_dof_);
+      std::copy(joint_position_sample_.data(), joint_position_sample_.data() + n_dof_, joint_state_desired_.position.begin());
+      std::copy(joint_velocity_sample_.data(), joint_velocity_sample_.data() + n_dof_, joint_state_desired_.velocity.begin());
+      joint_state_desired_out_.write(joint_state_desired_);
+    }
   }
 
   // Save the last joint position

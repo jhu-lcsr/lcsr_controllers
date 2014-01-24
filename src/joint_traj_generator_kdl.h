@@ -14,6 +14,9 @@
 #include <kdl/velocityprofile_trap.hpp>
 
 #include <trajectory_msgs/JointTrajectoryPoint.h>
+#include <sensor_msgs/JointState.h>
+
+#include <rtt_ros_tools/throttles.h>
 
 #include <conman/hook.h>
 
@@ -37,6 +40,7 @@ namespace lcsr_controllers {
     RTT::OutputPort<Eigen::VectorXd> joint_velocity_out_;
 
     RTT::InputPort<trajectory_msgs::JointTrajectoryPoint> joint_position_cmd_ros_in_;
+    RTT::OutputPort<sensor_msgs::JointState> joint_state_desired_out_;
 
   public:
     JointTrajGeneratorKDL(std::string const& name);
@@ -59,6 +63,7 @@ namespace lcsr_controllers {
 
     // State
     Eigen::VectorXd 
+      position_tolerance_,
       joint_position_,
       joint_position_last_,
       joint_position_cmd_,
@@ -68,6 +73,8 @@ namespace lcsr_controllers {
       joint_velocity_sample_;
 
     trajectory_msgs::JointTrajectoryPoint joint_position_cmd_ros_;
+    sensor_msgs::JointState joint_state_desired_;
+    rtt_ros_tools::PeriodicThrottle ros_publish_throttle_;
 
     bool has_last_position_data_;
 

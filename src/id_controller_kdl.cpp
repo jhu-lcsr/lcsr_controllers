@@ -8,6 +8,8 @@
 
 #include <kdl_parser/kdl_parser.hpp>
 
+#include <rtt_rosparam/rosparam.h>
+
 #include <rtt_ros_tools/tools.h>
 #include <kdl_urdf_tools/tools.h>
 #include "id_controller_kdl.h"
@@ -45,22 +47,35 @@ IDControllerKDL::IDControllerKDL(std::string const& name) :
   // Configure data ports
   this->ports()->addPort("joint_position_in", joint_position_in_);
   this->ports()->addPort("joint_velocity_in", joint_velocity_in_);
+  this->ports()->addPort("end_effector_cg_in", end_effector_cg_in_);
   this->ports()->addPort("joint_effort_out", joint_effort_out_)
     .doc("Output port: nx1 vector of joint torques. (n joints)");
   
   // Initialize properties from rosparam
-  rtt_ros_tools::load_rosparam_and_refresh(this);
 }
 
 bool IDControllerKDL::configureHook()
 {
+  // ROS parameters
+  boost::shared_ptr<rtt_rosparam::ROSParam> rosparam =
+    this->getProvider<rtt_rosparam::ROSParam>("rosparam");
+  // Get absoluate parameters
+  rosparam->getAbsolute("robot_description");
+  // Get private parameters
+  rosparam->getComponentPrivate("root_link");
+  rosparam->getComponentPrivate("tip_link");
+  rosparam->getComponentPrivate("wrench_link");
+  rosparam->getComponentPrivate("gravity");
+
+  RTT::log(RTT::Debug) << "Initializing kinematic and dynamic parameters from \"" << root_link_ << "\" to \"" << tip_link_ <<"\"" << RTT::endlog();
+
   // Initialize kinematics (KDL tree, KDL chain, and #DOF)
   urdf::Model urdf_model;
   if(!kdl_urdf_tools::initialize_kinematics_from_urdf(
         robot_description_, root_link_, tip_link_,
         n_dof_, kdl_chain_, kdl_tree_, urdf_model))
   {
-    ROS_ERROR("Could not initialize robot kinematics!");
+    RTT::log(RTT::Error) << "Could not initialize robot kinematics!" << RTT::endlog();
     return false;
   }
 
@@ -101,31 +116,43 @@ bool IDControllerKDL::startHook()
 void IDControllerKDL::updateHook()
 {
   // Read in the current joint positions & velocities
-  joint_position_in_.readNewest( joint_position_ );
-  joint_velocity_in_.readNewest( joint_velocity_ );
+  bool new_pos_data = joint_position_in_.readNewest( joint_position_ ) == RTT::NewData;
+  bool new_vel_data = joint_velocity_in_.readNewest( joint_velocity_ ) == RTT::NewData;
+  bool new_ee_data = end_effector_cg_in_.readNewest( end_effector_cg_ ) == RTT::NewData;
 
-  positions_.data = joint_position_;
-  velocities_.data = joint_velocity_;
-
-  // Compute inverse dynamics
-  // This computes the torques on each joint of the arm as a function of
-  // the arm's joint-space position, velocities, accelerations, external
-  // forces/torques and gravity.
-  if(id_solver_->CartToJnt(
-        positions_,
-        velocities_,
-        accelerations_,
-        ext_wrenches_,
-        torques_) != 0)
-  {
-    ROS_ERROR("Could not compute joint torques!");
+  if(new_ee_data) {
+    // Compute the external wrench on the tip link assuming a 
+    // Set the wrench (in root_link_ coordinates)
+    ext_wrenches_.back();
+  } else { 
+    // Zero the last wrench
+    ext_wrenches_.back() = KDL::Wrench::Zero();
   }
 
-  // Store the effort command
-  joint_effort_ = torques_.data;
+  if(new_pos_data && new_vel_data) {
+    positions_.data = joint_position_;
+    velocities_.data = joint_velocity_;
 
-  // Send joint positions
-  joint_effort_out_.write( joint_effort_ );
+    // Compute inverse dynamics
+    // This computes the torques on each joint of the arm as a function of
+    // the arm's joint-space position, velocities, accelerations, external
+    // forces/torques and gravity.
+    if(id_solver_->CartToJnt(
+          positions_,
+          velocities_,
+          accelerations_,
+          ext_wrenches_,
+          torques_) != 0)
+    {
+      RTT::log(RTT::Error) << "Could not compute joint torques!" << RTT::endlog();
+    }
+
+    // Store the effort command
+    joint_effort_ = torques_.data;
+
+    // Send joint positions
+    joint_effort_out_.write( joint_effort_ );
+  }
 }
 
 void IDControllerKDL::stopHook()

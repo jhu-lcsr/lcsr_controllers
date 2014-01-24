@@ -20,11 +20,14 @@ namespace lcsr_controllers {
     std::string robot_description_;
     std::string root_link_;
     std::string tip_link_;
+    std::string wrench_link_;
     std::vector<double> gravity_;
 
     // RTT Ports
     RTT::InputPort<Eigen::VectorXd> joint_position_in_;
     RTT::InputPort<Eigen::VectorXd> joint_velocity_in_;
+    //RTT::InputPort<Eigen::VectorXd> end_effector_wrench_in_;
+    RTT::InputPort<Eigen::VectorXd> end_effector_cg_in_;
     RTT::OutputPort<Eigen::VectorXd> joint_effort_out_;
 
   public:
@@ -53,6 +56,7 @@ namespace lcsr_controllers {
       joint_position_,
       joint_velocity_,
       joint_acceleration_,
+      end_effector_cg_,
       joint_effort_;
 
   };
