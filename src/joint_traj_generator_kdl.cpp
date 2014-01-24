@@ -10,7 +10,7 @@
 
 #include <kdl_parser/kdl_parser.hpp>
 
-#include <rtt_ros/time.h>
+#include <rtt_ros/clock.h>
 #include <rtt_rosparam/rosparam.h>
 #include <rtt_rostopic/rostopic.h>
 
@@ -218,7 +218,7 @@ void JointTrajGeneratorKDL::updateHook()
 
     // Publish debug traj to ros
     if(ros_publish_throttle_.ready()) {
-      joint_state_desired_.header.stamp = rtt_ros::time::RTNow();
+      joint_state_desired_.header.stamp = rtt_ros::clock::rtt_now();
       joint_state_desired_.position.resize(n_dof_);
       joint_state_desired_.velocity.resize(n_dof_);
       std::copy(joint_position_sample_.data(), joint_position_sample_.data() + n_dof_, joint_state_desired_.position.begin());
