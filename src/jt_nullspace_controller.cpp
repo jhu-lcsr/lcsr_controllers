@@ -66,6 +66,9 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   this->ports()->addPort("err_wrench_debug_out", err_wrench_debug_out_);
   err_wrench_debug_out_.createStream(rostopic.connection("~/"+this->getName()+"/err_wrench"));
 
+  this->ports()->addPort("err_pose_debug_out", err_pose_debug_out_);
+  err_pose_debug_out_.createStream(rostopic.connection("~/"+this->getName()+"/err_pose"));
+
   this->ports()->addPort("pose_desired_in", pose_desired_in_);
   pose_desired_in_.createStream(rostopic.connection("~/"+this->getName()+"/pose_desired"));
 }
@@ -162,9 +165,11 @@ void JTNullspaceController::updateHook()
     }
 
     // Compute forward kinematics of current pose
+    // framevel_ is in the base_link coordinate frame
     fk_solver_vel_->JntToCart(posvel_, framevel_);
     // Compute the cartesian position and velocity error
-    framevel_err_ = framevel_desired_ * framevel_.Inverse();
+    // framevel_err_ is the transform from the current to the desired pose in the frame of the base link
+    framevel_err_ = framevel_.Inverse() * framevel_desired_;
 
     // Rotation error
     Eigen::Vector3d r_err = Eigen::Map<Eigen::Vector3d>(framevel_err_.M.R.GetRot().data);
@@ -237,6 +242,12 @@ void JTNullspaceController::updateHook()
       wrench_msg_.wrench.torque.y = f(4);
       wrench_msg_.wrench.torque.z = f(5);
       err_wrench_debug_out_.write(wrench_msg_);
+
+      KDL::Frame frame_err_(framevel_err_.M.R,framevel_err_.p.p);
+      pose_err_msg_.header.frame_id = tip_link_;
+      pose_err_msg_.header.stamp = rtt_rosclock::host_rt_now();
+      tf::poseKDLToMsg(frame_err_,pose_err_msg_.pose);
+      err_pose_debug_out_.write(pose_err_msg_);
     }
   }
 }

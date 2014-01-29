@@ -44,6 +44,7 @@ namespace lcsr_controllers {
     RTT::OutputPort<Eigen::VectorXd> joint_effort_out_;
 
     RTT::InputPort<geometry_msgs::PoseStamped> pose_desired_in_;
+    RTT::OutputPort<geometry_msgs::PoseStamped> err_pose_debug_out_;
     RTT::OutputPort<geometry_msgs::WrenchStamped> err_wrench_debug_out_;
 
   public:
@@ -89,6 +90,7 @@ namespace lcsr_controllers {
       cartesian_effort_limits_;
 
     geometry_msgs::WrenchStamped wrench_msg_;
+    geometry_msgs::PoseStamped pose_err_msg_;
     geometry_msgs::PoseStamped pose_msg_;
 
     rtt_ros_tools::PeriodicThrottle debug_throttle_;
