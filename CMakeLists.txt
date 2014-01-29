@@ -10,6 +10,7 @@ find_package(catkin REQUIRED
   rtt_ros_tools
   rtt_sensor_msgs
   kdl_urdf_tools
+  kdl_conversions
   control_toolbox)
 
 find_package(Orocos-KDL REQUIRED)
@@ -45,6 +46,7 @@ orocos_component(${PROJECT_NAME}
   src/id_controller_kdl.cpp
   src/joint_traj_generator_kdl.cpp
   src/semi_absolute_calibration_controller.cpp
+  src/jt_nullspace_controller.cpp
   )
 
 target_link_libraries(
