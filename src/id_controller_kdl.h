@@ -14,6 +14,11 @@
 #include <kdl/chainidsolver_recursive_newton_euler.hpp>
 #include <kdl/chainfksolverpos_recursive.hpp>
 
+#include <rtt_ros_tools/throttles.h>
+
+#include <geometry_msgs/WrenchStamped.h>
+#include <visualization_msgs/Marker.h>
+
 namespace lcsr_controllers {
   class IDControllerKDL : public RTT::TaskContext
   {
@@ -29,6 +34,9 @@ namespace lcsr_controllers {
     RTT::InputPort<Eigen::VectorXd> joint_velocity_in_;
     RTT::InputPort<Eigen::VectorXd> end_effector_masses_in_;
     RTT::OutputPort<Eigen::VectorXd> joint_effort_out_;
+
+    RTT::OutputPort<geometry_msgs::WrenchStamped> ext_wrenches_debug_out_;
+    RTT::OutputPort<visualization_msgs::Marker> cogs_debug_out_;
 
   public:
     IDControllerKDL(std::string const& name);
@@ -66,6 +74,11 @@ namespace lcsr_controllers {
     KDL::RigidBodyInertia ee_inertia;
     KDL::Wrench ee_wrench;
 
+    geometry_msgs::WrenchStamped wrench_msg_;
+    std::vector<visualization_msgs::Marker> cogs_msgs_;
+
+    rtt_ros_tools::PeriodicThrottle debug_throttle_;
+    bool compensate_end_effector_;
   };
 }
 

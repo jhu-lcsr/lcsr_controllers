@@ -11,6 +11,8 @@
 #include <rtt_rosparam/rosparam.h>
 
 #include <rtt_ros_tools/tools.h>
+#include <rtt_rostopic/rostopic.h>
+#include <rtt_rosclock/rtt_rosclock.h>
 #include <kdl_urdf_tools/tools.h>
 #include "id_controller_kdl.h"
 
@@ -32,6 +34,9 @@ IDControllerKDL::IDControllerKDL(std::string const& name) :
   ,positions_()
   ,accelerations_()
   ,torques_()
+  // Throttles
+  ,debug_throttle_(0.05)
+  ,compensate_end_effector_(true)
 {
   // Zero gravity
   gravity_.setZero();
@@ -46,6 +51,8 @@ IDControllerKDL::IDControllerKDL(std::string const& name) :
     .doc("The root link for the controller.");
   this->addProperty("tip_link",tip_link_)
     .doc("The tip link for the controller.");
+  this->addProperty("compensate_end_effector",compensate_end_effector_)
+    .doc("Will compute a wrench on the tip link if true.");
 
   // Configure data ports
   this->ports()->addPort("joint_position_in", joint_position_in_);
@@ -54,6 +61,16 @@ IDControllerKDL::IDControllerKDL(std::string const& name) :
     .doc("Additional masses rigidly attached to the end-effector. Given as (x,y,z,m) in the coordinate frame given by the tip_link property of this component");
   this->ports()->addPort("joint_effort_out", joint_effort_out_)
     .doc("Output port: nx1 vector of joint torques. (n joints)");
+
+  // Get an instance of the rtt_rostopic service requester
+  rtt_rostopic::ROSTopic rostopic;
+
+  // Add the port and stream it to a ROS topic
+  this->ports()->addPort("ext_wrenches_debug_out", ext_wrenches_debug_out_);
+  ext_wrenches_debug_out_.createStream(rostopic.connection("~/"+this->getName()+"/wrenches"));
+
+  this->ports()->addPort("cogs_debug_out", cogs_debug_out_);
+  cogs_debug_out_.createStream(rostopic.bufferedConnection("~/"+this->getName()+"/cogs",32));
 }
 
 bool IDControllerKDL::configureHook()
@@ -79,6 +96,30 @@ bool IDControllerKDL::configureHook()
     return false;
   }
 
+  // Create a PoseStamped message for each center of gravity
+  for(std::vector<KDL::Segment>::const_iterator it=kdl_chain_.segments.begin();
+      it != kdl_chain_.segments.end();
+      ++it)
+  {
+    visualization_msgs::Marker cog_pose;
+    cog_pose.header.frame_id = it->getName();
+    cog_pose.ns = it->getName();
+    cog_pose.type = visualization_msgs::Marker::SPHERE;
+    cog_pose.frame_locked = true;
+    cog_pose.scale.x = 0.02;
+    cog_pose.scale.y = 0.02;
+    cog_pose.scale.z = 0.02;
+    cog_pose.color.r = 28.0/255.0;
+    cog_pose.color.g = 217.0/255.0;
+    cog_pose.color.b = 214.0/255.0;
+    cog_pose.color.a = 128.0;
+    cog_pose.pose.position.x = it->getInertia().getCOG().x();
+    cog_pose.pose.position.y = it->getInertia().getCOG().y();
+    cog_pose.pose.position.z = it->getInertia().getCOG().z();
+
+    cogs_msgs_.push_back(cog_pose);
+  }
+
   // Create inverse dynamics chainsolver
   id_solver_.reset(
       new KDL::ChainIdSolver_RNE(
@@ -100,6 +141,11 @@ bool IDControllerKDL::configureHook()
   accelerations_.resize(n_dof_);
   ext_wrenches_.resize(kdl_chain_.getNrOfSegments());
   torques_.resize(n_dof_);
+
+  // Initialize the wrenches
+  for(size_t i=0; i<kdl_chain_.getNrOfSegments(); i++) {
+    ext_wrenches_[i] = KDL::Wrench::Zero();
+  }
 
   // Prepare ports for realtime processing
   joint_effort_out_.setDataSample(joint_effort_);
@@ -154,14 +200,13 @@ void IDControllerKDL::updateHook()
     velocities_.data = joint_velocity_;
 
     // Compute wwrenches on the end-effector
-    if(true) {
+    if(compensate_end_effector_) {
       // Compute the tip frame from the current joint position
       KDL::Frame tip_frame;
       int ret = fk_solver_->JntToCart(positions_, tip_frame);
-      // Compute gravity in the tip frame
-      KDL::Vector tip_gravity = tip_frame.M * KDL::Vector(gravity_[0], gravity_[1], gravity_[2]);
+      // Compute gravity vector in the tip frame
+      KDL::Vector tip_gravity = tip_frame.M.Inverse() * KDL::Vector(gravity_[0], gravity_[1], gravity_[2]);
       KDL::Twist tip_gravity_twist(tip_gravity, KDL::Vector::Zero()); //TODO: Add centripetal acceleration (v*r^2)
-      // Transform the EE cog into the root_link_ frame (wrench/gravity frame)
       ee_wrench = ee_inertia * tip_gravity_twist;
       // Compute the external wrench on the tip link
       // Set the wrench (in root_link_ coordinates)
@@ -190,6 +235,27 @@ void IDControllerKDL::updateHook()
 
     // Send joint positions
     joint_effort_out_.write( joint_effort_ );
+
+    // Debug visualization
+    if(this->debug_throttle_.ready(0.05)) {
+      wrench_msg_.header.frame_id = tip_link_;
+      wrench_msg_.header.stamp = rtt_rosclock::host_rt_now();
+      wrench_msg_.wrench.force.x = ext_wrenches_.back().force.x();
+      wrench_msg_.wrench.force.y = ext_wrenches_.back().force.y();
+      wrench_msg_.wrench.force.z = ext_wrenches_.back().force.z();
+      wrench_msg_.wrench.torque.x = ext_wrenches_.back().torque.x();
+      wrench_msg_.wrench.torque.y = ext_wrenches_.back().torque.y();
+      wrench_msg_.wrench.torque.z = ext_wrenches_.back().torque.z();
+      ext_wrenches_debug_out_.write(wrench_msg_);
+
+      for(std::vector<visualization_msgs::Marker>::iterator it = cogs_msgs_.begin();
+          it != cogs_msgs_.end();
+          ++it)
+      {
+        it->header.stamp = wrench_msg_.header.stamp;
+        cogs_debug_out_.write(*it);
+      }
+    }
   }
 }
 
