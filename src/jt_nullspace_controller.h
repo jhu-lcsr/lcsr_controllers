@@ -66,6 +66,12 @@ namespace lcsr_controllers {
       linear_d_gain_,
       angular_p_gain_,
       angular_d_gain_;
+    double
+      linear_safety_threshold_,
+      angular_safety_threshold_;
+    double
+      safe_linear_p_gain_,
+      safe_angular_p_gain_;
 
     // Solvers
     boost::scoped_ptr<KDL::ChainFkSolverVel> fk_solver_vel_;

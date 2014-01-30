@@ -47,8 +47,12 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
 
   this->addProperty("linear_p_gain",linear_p_gain_);
   this->addProperty("linear_d_gain",linear_d_gain_);
+  this->addProperty("safe_linear_p_gain",safe_linear_p_gain_);
+  this->addProperty("linear_safety_threshold",linear_safety_threshold_);
   this->addProperty("angular_p_gain",angular_p_gain_);
   this->addProperty("angular_d_gain",angular_d_gain_);
+  this->addProperty("safe_angular_p_gain",safe_angular_p_gain_);
+  this->addProperty("angular_safety_threshold",angular_safety_threshold_);
 
   cartesian_effort_limits_.resize(6);
   this->addProperty("cartesian_effort_limits",cartesian_effort_limits_);
@@ -84,8 +88,12 @@ bool JTNullspaceController::configureHook()
   rosparam->getComponentPrivate("tip_link");
   rosparam->getComponentPrivate("linear_p_gain");
   rosparam->getComponentPrivate("linear_d_gain");
+  rosparam->getComponentPrivate("linear_safety_threshold");
   rosparam->getComponentPrivate("angular_p_gain");
   rosparam->getComponentPrivate("angular_d_gain");
+  rosparam->getComponentPrivate("angular_safety_threshold");
+  rosparam->getComponentPrivate("safe_linear_p_gain");
+  rosparam->getComponentPrivate("safe_angular_p_gain");
 
   RTT::log(RTT::Debug) << "Initializing kinematic parameters from \"" << root_link_ << "\" to \"" << tip_link_ <<"\"" << RTT::endlog();
 
@@ -182,8 +190,8 @@ void JTNullspaceController::updateHook()
 
     // Generalized force from PD control
     Eigen::Matrix<double, 6, 1> f;
-    f.segment<3>(0) = linear_p_gain_*p_err + linear_d_gain_*v_err;
-    f.segment<3>(3) = angular_p_gain_*r_err + angular_d_gain_*w_err;
+    f.segment<3>(0) = (p_err.norm() > linear_safety_threshold_ ? safe_linear_p_gain_ : linear_p_gain_)*p_err + linear_d_gain_*v_err;
+    f.segment<3>(3) = (r_err.norm() > angular_safety_threshold_ ? safe_angular_p_gain_ : angular_p_gain_)*r_err + angular_d_gain_*w_err;
 
     // Clip force by effort limits
     f = f.cwiseMin(cartesian_effort_limits_).cwiseMax(-cartesian_effort_limits_);
