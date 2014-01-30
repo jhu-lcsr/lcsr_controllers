@@ -31,11 +31,30 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   ,tip_link_("")
   // Working variables
   ,n_dof_(0)
+  // Params
+  ,linear_p_gain_(0.0)
+  ,linear_d_gain_(0.0)
+  ,linear_effort_threshold_(0.0)
+  ,linear_position_threshold_(0.0)
+  ,linear_position_err_norm_(0.0)
+  ,linear_effort_norm_(0.0)
+  ,angular_p_gain_(0.0)
+  ,angular_d_gain_(0.0)
+  ,angular_effort_threshold_(0.0)
+  ,angular_position_threshold_(0.0)
+  ,angular_position_err_norm_(0.0)
+  ,angular_effort_norm_(0.0)
   ,fk_solver_vel_(NULL)
   ,jac_solver_(NULL)
   ,chain_dynamics_(NULL)
+  ,wrench_(6)
   // Throttles
   ,debug_throttle_(0.05)
+  ,linear_position_within_tolerance_(false)
+  ,linear_effort_within_tolerance_(false)
+  ,angular_position_within_tolerance_(false)
+  ,angular_effort_within_tolerance_(false)
+  ,within_tolerance_(false)
 {
   // Declare properties
   this->addProperty("robot_description",robot_description_)
@@ -47,15 +66,26 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
 
   this->addProperty("linear_p_gain",linear_p_gain_);
   this->addProperty("linear_d_gain",linear_d_gain_);
-  this->addProperty("safe_linear_p_gain",safe_linear_p_gain_);
-  this->addProperty("linear_safety_threshold",linear_safety_threshold_);
+  this->addProperty("linear_position_threshold",linear_position_threshold_);
+  this->addProperty("linear_effort_threshold",linear_effort_threshold_);
   this->addProperty("angular_p_gain",angular_p_gain_);
   this->addProperty("angular_d_gain",angular_d_gain_);
-  this->addProperty("safe_angular_p_gain",safe_angular_p_gain_);
-  this->addProperty("angular_safety_threshold",angular_safety_threshold_);
+  this->addProperty("angular_position_threshold",angular_position_threshold_);
+  this->addProperty("angular_effort_threshold",angular_effort_threshold_);
 
-  cartesian_effort_limits_.resize(6);
-  this->addProperty("cartesian_effort_limits",cartesian_effort_limits_);
+  // Introspection
+  this->addAttribute("linear_position_err_norm",linear_position_err_norm_);
+  this->addAttribute("linear_effort_norm",linear_effort_norm_);
+  this->addAttribute("angular_position_err_norm",angular_position_err_norm_);
+  this->addAttribute("angular_effort_norm",angular_effort_norm_);
+  this->addAttribute("wrench_raw",wrench_);
+  this->addAttribute("joint_effort_raw",joint_effort_raw_);
+  this->addAttribute("joint_effort_null_raw",joint_effort_null_);
+  this->addAttribute("linear_position_within_tolerance",linear_position_within_tolerance_);
+  this->addAttribute("linear_effort_within_tolerance",linear_effort_within_tolerance_);
+  this->addAttribute("angular_position_within_tolerance",angular_position_within_tolerance_);
+  this->addAttribute("angular_effort_within_tolerance",angular_effort_within_tolerance_);
+  this->addAttribute("within_tolerance",within_tolerance_);
 
   // Configure data ports
   this->ports()->addPort("joint_position_in", joint_position_in_);
@@ -88,12 +118,12 @@ bool JTNullspaceController::configureHook()
   rosparam->getComponentPrivate("tip_link");
   rosparam->getComponentPrivate("linear_p_gain");
   rosparam->getComponentPrivate("linear_d_gain");
-  rosparam->getComponentPrivate("linear_safety_threshold");
+  rosparam->getComponentPrivate("linear_effort_threshold");
+  rosparam->getComponentPrivate("linear_position_threshold");
   rosparam->getComponentPrivate("angular_p_gain");
   rosparam->getComponentPrivate("angular_d_gain");
-  rosparam->getComponentPrivate("angular_safety_threshold");
-  rosparam->getComponentPrivate("safe_linear_p_gain");
-  rosparam->getComponentPrivate("safe_angular_p_gain");
+  rosparam->getComponentPrivate("angular_effort_threshold");
+  rosparam->getComponentPrivate("angular_position_threshold");
 
   RTT::log(RTT::Debug) << "Initializing kinematic parameters from \"" << root_link_ << "\" to \"" << tip_link_ <<"\"" << RTT::endlog();
 
@@ -106,7 +136,6 @@ bool JTNullspaceController::configureHook()
     RTT::log(RTT::Error) << "Could not initialize robot kinematics!" << RTT::endlog();
     return false;
   }
-  rosparam->getComponentPrivate("cartesian_effort_limits");
 
   // Initialize IK solver
   fk_solver_vel_.reset(
@@ -188,13 +217,16 @@ void JTNullspaceController::updateHook()
     // Velocity error
     Eigen::Vector3d v_err = Eigen::Map<Eigen::Vector3d>(framevel_err_.p.v.data);
 
-    // Generalized force from PD control
-    Eigen::Matrix<double, 6, 1> f;
-    f.segment<3>(0) = (p_err.norm() > linear_safety_threshold_ ? safe_linear_p_gain_ : linear_p_gain_)*p_err + linear_d_gain_*v_err;
-    f.segment<3>(3) = (r_err.norm() > angular_safety_threshold_ ? safe_angular_p_gain_ : angular_p_gain_)*r_err + angular_d_gain_*w_err;
+    // Check pos/vel tolerances
+    linear_position_err_norm_ = p_err.norm();
+    angular_position_err_norm_ = r_err.norm();
 
-    // Clip force by effort limits
-    f = f.cwiseMin(cartesian_effort_limits_).cwiseMax(-cartesian_effort_limits_);
+    linear_position_within_tolerance_ = linear_position_err_norm_ < linear_position_threshold_;
+    angular_position_within_tolerance_ = angular_position_err_norm_ < angular_position_threshold_;
+
+    // Generalized force from PD control
+    wrench_.segment<3>(0) = linear_p_gain_*p_err + linear_d_gain_*v_err;
+    wrench_.segment<3>(3) = angular_p_gain_*r_err + angular_d_gain_*w_err;
 
     // Handy typedefs
     typedef Eigen::Matrix<double, 6, Eigen::Dynamic> Matrix6Jd;
@@ -233,8 +265,28 @@ void JTNullspaceController::updateHook()
     // TODO: Do something smart here
     joint_effort_null_.setZero();
 
+    joint_effort_raw_ = J_t*wrench_;
+
     // Project the hell out of it
-    joint_effort_ = J_t*f + N_t*joint_effort_null_;
+    joint_effort_ = joint_effort_raw_ + N_t*joint_effort_null_;
+
+    // Check effort tolerances
+    linear_effort_norm_ = wrench_.block(0,0,3,1).norm();
+    angular_effort_norm_ = wrench_.block(3,0,3,1).norm();
+    linear_effort_within_tolerance_ = linear_effort_norm_ < linear_effort_threshold_;
+    angular_effort_within_tolerance_ = angular_effort_norm_ < angular_effort_threshold_;
+
+    // Safety: set output effor to zero if not within tolerances
+    within_tolerance_ =
+      within_tolerance_ &&
+      linear_effort_within_tolerance_ &&
+      linear_position_within_tolerance_ &&
+      angular_effort_within_tolerance_ &&
+      angular_position_within_tolerance_;
+
+    if(!within_tolerance_) {
+      joint_effort_.setZero();
+    }
 
     // Send joint positions
     joint_effort_out_.write( joint_effort_ );
@@ -243,12 +295,12 @@ void JTNullspaceController::updateHook()
     if(this->debug_throttle_.ready(0.05)) {
       wrench_msg_.header.frame_id = tip_link_;
       wrench_msg_.header.stamp = rtt_rosclock::host_rt_now();
-      wrench_msg_.wrench.force.x = f(0);
-      wrench_msg_.wrench.force.y = f(1);
-      wrench_msg_.wrench.force.z = f(2);
-      wrench_msg_.wrench.torque.x = f(3);
-      wrench_msg_.wrench.torque.y = f(4);
-      wrench_msg_.wrench.torque.z = f(5);
+      wrench_msg_.wrench.force.x = wrench_(0);
+      wrench_msg_.wrench.force.y = wrench_(1);
+      wrench_msg_.wrench.force.z = wrench_(2);
+      wrench_msg_.wrench.torque.x = wrench_(3);
+      wrench_msg_.wrench.torque.y = wrench_(4);
+      wrench_msg_.wrench.torque.z = wrench_(5);
       err_wrench_debug_out_.write(wrench_msg_);
 
       KDL::Frame frame_err_(framevel_err_.M.R,framevel_err_.p.p);

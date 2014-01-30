@@ -64,14 +64,23 @@ namespace lcsr_controllers {
     double
       linear_p_gain_,
       linear_d_gain_,
+      linear_effort_threshold_,
+      linear_position_threshold_,
+      linear_position_err_norm_,
+      linear_effort_norm_,
       angular_p_gain_,
-      angular_d_gain_;
-    double
-      linear_safety_threshold_,
-      angular_safety_threshold_;
-    double
-      safe_linear_p_gain_,
-      safe_angular_p_gain_;
+      angular_d_gain_,
+      angular_effort_threshold_,
+      angular_position_threshold_,
+      angular_position_err_norm_,
+      angular_effort_norm_;
+
+    bool 
+      linear_position_within_tolerance_,
+      linear_effort_within_tolerance_,
+      angular_position_within_tolerance_,
+      angular_effort_within_tolerance_,
+      within_tolerance_;
 
     // Solvers
     boost::scoped_ptr<KDL::ChainFkSolverVel> fk_solver_vel_;
@@ -91,9 +100,10 @@ namespace lcsr_controllers {
     Eigen::VectorXd 
       joint_position_,
       joint_velocity_,
+      wrench_,
       joint_effort_,
-      joint_effort_null_,
-      cartesian_effort_limits_;
+      joint_effort_raw_,
+      joint_effort_null_;
 
     geometry_msgs::WrenchStamped wrench_msg_;
     geometry_msgs::PoseStamped pose_err_msg_;
