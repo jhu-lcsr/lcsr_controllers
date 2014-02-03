@@ -103,7 +103,8 @@ namespace lcsr_controllers {
       wrench_,
       joint_effort_,
       joint_effort_raw_,
-      joint_effort_null_;
+      joint_effort_null_,
+      joint_d_gains_;
 
     geometry_msgs::WrenchStamped wrench_msg_;
     geometry_msgs::PoseStamped pose_err_msg_;

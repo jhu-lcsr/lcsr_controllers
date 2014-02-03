@@ -73,6 +73,9 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   this->addProperty("angular_position_threshold",angular_position_threshold_);
   this->addProperty("angular_effort_threshold",angular_effort_threshold_);
 
+  this->addProperty("joint_d_gains",joint_d_gains_)
+    .doc("Derivative gain used for joint-space control in the nullspace of the task-space command.");
+
   // Introspection
   this->addAttribute("linear_position_err_norm",linear_position_err_norm_);
   this->addAttribute("linear_effort_norm",linear_effort_norm_);
@@ -125,6 +128,8 @@ bool JTNullspaceController::configureHook()
   rosparam->getComponentPrivate("angular_effort_threshold");
   rosparam->getComponentPrivate("angular_position_threshold");
 
+  rosparam->getComponentPrivate("joint_d_gains");
+
   RTT::log(RTT::Debug) << "Initializing kinematic parameters from \"" << root_link_ << "\" to \"" << tip_link_ <<"\"" << RTT::endlog();
 
   // Initialize kinematics (KDL tree, KDL chain, and #DOF)
@@ -159,6 +164,7 @@ bool JTNullspaceController::configureHook()
   posvel_.resize(n_dof_);
   jacobian_.resize(n_dof_);
   joint_inertia_.resize(n_dof_);
+  joint_d_gains_.resize(n_dof_);
 
   // Prepare ports for realtime processing
   joint_effort_out_.setDataSample(joint_effort_);
@@ -263,7 +269,7 @@ void JTNullspaceController::updateHook()
 
     // Compute nullspace effort (to be projected)
     // TODO: Do something smart here
-    joint_effort_null_.setZero();
+    joint_effort_null_ = -1.0 * (joint_d_gains_.array() * joint_velocity_.array()).matrix();
 
     joint_effort_raw_ = J_t*wrench_;
 
