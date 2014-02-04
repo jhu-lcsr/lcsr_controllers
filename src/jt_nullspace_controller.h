@@ -40,7 +40,7 @@ namespace lcsr_controllers {
     // RTT Ports
     RTT::InputPort<Eigen::VectorXd> joint_position_in_;
     RTT::InputPort<Eigen::VectorXd> joint_velocity_in_;
-    RTT::InputPort<KDL::FrameVel> post_twist_in_;
+    RTT::InputPort<KDL::FrameVel> pose_twist_in_;
     RTT::OutputPort<Eigen::VectorXd> joint_effort_out_;
 
     RTT::InputPort<geometry_msgs::PoseStamped> pose_desired_in_;

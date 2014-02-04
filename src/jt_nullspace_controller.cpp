@@ -93,7 +93,7 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   // Configure data ports
   this->ports()->addPort("joint_position_in", joint_position_in_);
   this->ports()->addPort("joint_velocity_in", joint_velocity_in_);
-  this->ports()->addPort("post_twist_in", post_twist_in_);
+  this->ports()->addPort("pose_twist_in", pose_twist_in_);
   this->ports()->addPort("joint_effort_out", joint_effort_out_);
 
   // Get an instance of the rtt_rostopic service requester
@@ -193,7 +193,7 @@ void JTNullspaceController::updateHook()
 
     // Read the command
     RTT::FlowStatus ros_status = pose_desired_in_.readNewest(pose_msg_);
-    RTT::FlowStatus rtt_status = post_twist_in_.readNewest(framevel_desired_);
+    RTT::FlowStatus rtt_status = pose_twist_in_.readNewest(framevel_desired_);
     if(ros_status == RTT::NewData) {
       KDL::Frame frame;
       tf::poseMsgToKDL(pose_msg_.pose, frame);
