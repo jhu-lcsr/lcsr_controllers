@@ -174,6 +174,9 @@ bool JTNullspaceController::configureHook()
 
 bool JTNullspaceController::startHook()
 {
+  // Reset tolerance flag (if only the world worked this way...)
+  within_tolerance_ = true;
+
   return true;
 }
 
@@ -268,7 +271,7 @@ void JTNullspaceController::updateHook()
     MatrixJJd N_t = N.transpose();
 
     // Compute nullspace effort (to be projected)
-    // TODO: Do something smart here
+    // TODO: Do something smart(er) here
     joint_effort_null_ = -1.0 * (joint_d_gains_.array() * joint_velocity_.array()).matrix();
 
     joint_effort_raw_ = J_t*wrench_;
