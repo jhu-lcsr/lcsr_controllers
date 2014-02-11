@@ -14,12 +14,18 @@
 #include <kdl/chain.hpp>
 #include <kdl/velocityprofile_trap.hpp>
 
+#include <trajectory_msgs/JointTrajectory.h>
 #include <trajectory_msgs/JointTrajectoryPoint.h>
 #include <sensor_msgs/JointState.h>
 
 #include <rtt_ros_tools/throttles.h>
 
 #include <conman/hook.h>
+
+#include <ReflexxesAPI.h>
+#include <RMLVelocityFlags.h>
+#include <RMLVelocityInputParameters.h>
+#include <RMLVelocityOutputParameters.h>
 
 namespace lcsr_controllers {
   class JointTrajGeneratorRML : public RTT::TaskContext
@@ -37,11 +43,13 @@ namespace lcsr_controllers {
     // RTT Ports
     RTT::InputPort<Eigen::VectorXd> joint_position_in_;
     RTT::InputPort<Eigen::VectorXd> joint_velocity_in_;
-    RTT::InputPort<Eigen::VectorXd> joint_position_cmd_eig_in_;
+    RTT::InputPort<Eigen::VectorXd> joint_position_cmd_in_;
+
     RTT::OutputPort<Eigen::VectorXd> joint_position_out_;
     RTT::OutputPort<Eigen::VectorXd> joint_velocity_out_;
 
     RTT::InputPort<trajectory_msgs::JointTrajectoryPoint> joint_position_cmd_ros_in_;
+    RTT::InputPort<trajectory_msgs::JointTrajectory> joint_traj_cmd_in_;
     RTT::OutputPort<sensor_msgs::JointState> joint_state_desired_out_;
 
   public:
@@ -64,7 +72,7 @@ namespace lcsr_controllers {
     std::vector<RTT::Seconds> trajectory_end_times_;
 
     // State
-    Eigen::VectorXd `
+    Eigen::VectorXd
       position_tolerance_,
       joint_position_,
       joint_position_last_,
@@ -75,6 +83,7 @@ namespace lcsr_controllers {
       joint_velocity_sample_;
 
     trajectory_msgs::JointTrajectoryPoint joint_position_cmd_ros_;
+    trajectory_msgs::JointTrajectory joint_traj_cmd_;
     sensor_msgs::JointState joint_state_desired_;
     rtt_ros_tools::PeriodicThrottle ros_publish_throttle_;
 
@@ -90,11 +99,8 @@ namespace lcsr_controllers {
   protected:
     size_t n_joints_;
     std::vector<std::string> joint_names_;
-    std::vector< boost::shared_ptr<control_toolbox::Pid> > pids_;
     std::vector<double> position_tolerances_;
-    std::vector<double> max_jerks_;
     std::vector<double> commanded_efforts_;
-    std::vector<hardware_interface::JointHandle> joints_;
     std::vector<boost::shared_ptr<const urdf::Joint> > urdf_joints_;
 
     size_t point_index_;
@@ -120,9 +126,6 @@ namespace lcsr_controllers {
     bool new_reference_;
     bool recompute_trajectory_;
 
-    boost::scoped_ptr<realtime_tools::RealtimePublisher<controllers_msgs::JointControllerState> > 
-      controller_state_publisher_ ;
-
     // Command subscriber
     ros::Subscriber trajectory_command_sub_;
     void trajectoryCommandCB(const trajectory_msgs::JointTrajectoryConstPtr& msg);
@@ -135,7 +138,7 @@ namespace lcsr_controllers {
         positions(n_dof, 0.0),
         velocities(n_dof,0.0),
         accelerations(n_dof, 0.0),
-        start_time(start_time_) 
+        start_time(start_time_),
         end_time(end_time_) 
       { }
 
@@ -146,12 +149,12 @@ namespace lcsr_controllers {
       ros::Time end_time;
 
       //! End-Time comparison function for binary search
-      static bool StartTimeCompare(ViaPoint &v1, ViaPoint &v2) { 
+      static bool StartTimeCompare(const ViaPoint &v1, const ViaPoint &v2) { 
         return v1.start_time < v2.start_time;
       }
 
       //! End-Time comparison function for binary search
-      static bool EndTimeCompare(ViaPoint &v1, ViaPoint &v2) { 
+      static bool EndTimeCompare(const ViaPoint &v1, const ViaPoint &v2) { 
         return v1.end_time < v2.end_time;
       }
     };
@@ -160,6 +163,8 @@ namespace lcsr_controllers {
 
     //! Via points to follow
     Vias vias_;
+
+    bool new_via_goal_;
   };
 }
 

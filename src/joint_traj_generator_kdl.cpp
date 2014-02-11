@@ -235,8 +235,8 @@ void JointTrajGeneratorKDL::updateHook()
 void JointTrajGeneratorKDL::stopHook()
 {
   // Clear data buffers (this will make them return OldData if nothing new is written to them)
-  joint_position_in_.getManager()->clear();
-  joint_velocity_sample_.getManager()->clear();
+  joint_position_in_.clear();
+  joint_velocity_in_.clear();
 }
 
 void JointTrajGeneratorKDL::cleanupHook()

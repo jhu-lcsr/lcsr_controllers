@@ -1,6 +1,7 @@
 
 
 #include <iostream>
+#include <algorithm>
 #include <map>
 
 #include <Eigen/Dense>
@@ -16,7 +17,7 @@
 #include <rtt_rostopic/rostopic.h>
 
 #include <kdl_urdf_tools/tools.h>
-#include "joint_traj_generator_kdl.h"
+#include "joint_traj_generator_rml.h"
 
 using namespace lcsr_controllers;
 
@@ -40,12 +41,12 @@ JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
   this->addProperty("max_accelerations",max_accelerations_).doc("Maximum acceperations for trap generation.");
   this->addProperty("position_tolerance",position_tolerance_).doc("Maximum position error.");
   this->addProperty("velocity_smoothing_factor",velocity_smoothing_factor_).doc("Exponential smoothing factor to use when estimating veolocity from finite differences.");
-  this->addProperty("sampling_resolution",sampling_resolution);
+  this->addProperty("sampling_resolution",sampling_resolution_);
   
   // Configure data ports
   this->ports()->addPort("joint_position_in", joint_position_in_);
   this->ports()->addPort("joint_velocity_in", joint_velocity_in_);
-  this->ports()->addPort("joint_position_cmd_in", joint_position_cmd_eig_in_);
+  this->ports()->addPort("joint_position_cmd_in", joint_position_cmd_in_);
   this->ports()->addPort("joint_position_out", joint_position_out_)
     .doc("Output port: nx1 vector of joint positions. (n joints)");
   this->ports()->addPort("joint_velocity_out", joint_velocity_out_)
@@ -53,6 +54,7 @@ JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
 
   // ROS ports
   this->ports()->addPort("joint_position_cmd_ros_in", joint_position_cmd_ros_in_);
+  this->ports()->addPort("joint_traj_cmd_in", joint_traj_cmd_in_);
   this->ports()->addPort("joint_state_desired_out", joint_state_desired_out_);
 
   // Load Conman interface
@@ -134,8 +136,6 @@ bool JointTrajGeneratorRML::configureHook()
 
   // Get individual joint properties from urdf and parameter server
   joint_names_.resize(n_dof_);
-  pids_.resize(n_dof_);
-  joints_.resize(n_dof_);
   urdf_joints_.resize(n_dof_);
   position_tolerances_.resize(n_dof_);
   max_jerks_.resize(n_dof_);
@@ -193,7 +193,7 @@ void JointTrajGeneratorRML::updateHook()
   RTT::FlowStatus new_velocity_status = joint_velocity_in_.readNewest(joint_velocity_);
 
   // If we don't get any position update, we don't write any new data to the ports
-  if(new_position_data == RTT::OldData || new_velocity_status == RTT::OldData) {
+  if(new_position_status == RTT::OldData || new_velocity_status == RTT::OldData) {
     return;
   }
 
@@ -206,7 +206,8 @@ void JointTrajGeneratorRML::updateHook()
   {
     // Handle a position given as an Eigen vector
     ViaPoint via(n_dof_);
-    via.time = rtt_now;
+    via.start_time = rtt_now;
+    via.end_time = rtt_now;
     if(joint_position_cmd_.size() == n_dof_) {
       via.positions = joint_position_;
     }
@@ -219,7 +220,7 @@ void JointTrajGeneratorRML::updateHook()
     // TODO: Permute the joint names properly
     
     // Make sure the traj isn't empty
-    if(joint_position_cmd_.points.size() > 0) {
+    if(joint_traj_cmd_.points.size() > 0) {
       // Compute the earliest time that a point from this new trajectory should be achieved
       // It's assumed that the header timestamp is when this new trajectory
       // should start being executed. This also means that if there is a queued
@@ -230,8 +231,8 @@ void JointTrajGeneratorRML::updateHook()
       // time is non-zero, then it will become active once the start time has passed.
       // 
       ros::Time new_traj_start_time =
-        + (joint_traj_cmd_.header.stamp.isZero()) ? rtt_rosclock::host_rt_now() : joint_traj_cmd_.header.stamp
-        - rtt_rosclock::host_rt_offset_from_rtt();
+        ((joint_traj_cmd_.header.stamp.isZero()) ? rtt_rosclock::host_rt_now() : joint_traj_cmd_.header.stamp )
+        - ros::Duration(rtt_rosclock::host_rt_offset_from_rtt());
 
       ros::Time earliest_end_time = 
         new_traj_start_time
@@ -241,11 +242,11 @@ void JointTrajGeneratorRML::updateHook()
       
       // Determine where the points should begin to be inserted
       std::pair<Vias::iterator, Vias::iterator> insertion_range = 
-        std::equal_range(vias_.begin(), vias_.end(), earliest_via, ViaPoint::Lesser);
+        std::equal_range(vias_.begin(), vias_.end(), earliest_via, ViaPoint::StartTimeCompare);
 
       // Remove all vias with completion times after the earliest via time in the new trajectory
       vias_.erase(insertion_range.first, vias_.end());
-      vias_.reserve(vias_.size() + joint_traj_cmd_.points.size());
+      // only needed if vias_ is a vector vias_.reserve(vias_.size() + joint_traj_cmd_.points.size());
 
       // Convert the ROS joint trajectory to a set of Eigen ViaPoint structures
       for(std::vector<trajectory_msgs::JointTrajectoryPoint>::const_iterator it = joint_traj_cmd_.points.begin();
@@ -269,15 +270,15 @@ void JointTrajGeneratorRML::updateHook()
         }
         
         // Add the new via and copy the data
-        vias_.push_back(Via(n_dof_, new_via_start_time, new_traj_start_time + it->time_from_start));
-        Via &new_via = vias_.back();
+        vias_.push_back(ViaPoint(n_dof_, new_via_start_time, new_traj_start_time + it->time_from_start));
+        ViaPoint &new_via = vias_.back();
         std::copy(it->positions.begin(), it->positions.end(), new_via.positions.data());
         std::copy(it->velocities.begin(), it->velocities.end(), new_via.velocities.data());
         std::copy(it->accelerations.begin(), it->accelerations.end(), new_via.accelerations.data());
       }
     }
   }
-  else if(point_status == RTT::NoData && traj_status == RTT::NoData {
+  else if(point_status == RTT::NoData && traj_status == RTT::NoData) {
     // Initialize the samples with the current positions
     joint_position_sample_ = joint_position_;
     joint_velocity_sample_ = joint_velocity_;
@@ -303,7 +304,7 @@ void JointTrajGeneratorRML::updateHook()
   if(vias_.size() > 0 && vias_.front().start_time <= rtt_now) 
   {
     // Get a reference to the active via
-    Via &active_via = vias_.front();
+    ViaPoint &active_via = vias_.front();
 
     // Check for a new reference
     if(new_via_goal_) 
@@ -334,20 +335,17 @@ void JointTrajGeneratorRML::updateHook()
     // Compute RML traj after the start time and if there are still points in the queue
     if(recompute_trajectory_) 
    {
-      // Get reference to the active trajectory point
-      const trajectory_msgs::JointTrajectoryPoint &active_traj_point = commanded_trajectory.points[point_index_];
-
       // Compute the trajectory
       RTT::log(RTT::Debug) << ("RML Recomputing trajectory...") << RTT::endlog(); 
 
       // Update RML input parameters
       for(size_t i=0; i<n_dof_; i++) {
         rml_in_->SetCurrentPositionVectorElement(joint_position_(i), i);
-        rml_in_->SetCurrentVelocityVectorelement(joint_velocity_(i), i);
+        rml_in_->SetCurrentVelocityVectorElement(joint_velocity_(i), i);
         rml_in_->SetCurrentAccelerationVectorElement(0.0, i);
 
         rml_in_->SetTargetPositionVectorElement(active_via.positions(i), i);
-        rml_in_->SetTargetVelocityVectorelement(actuve_via.velocities(i), i);
+        rml_in_->SetTargetVelocityVectorElement(active_via.velocities(i), i);
 
         rml_in_->SetSelectionVectorElement(true,i);
       }
@@ -425,8 +423,8 @@ void JointTrajGeneratorRML::updateHook()
 void JointTrajGeneratorRML::stopHook()
 {
   // Clear data buffers (this will make them return OldData if nothing new is written to them)
-  joint_position_in_.getManager()->clear();
-  joint_velocity_sample_.getManager()->clear();
+  joint_position_in_.clear();
+  joint_velocity_in_.clear();
 }
 
 void JointTrajGeneratorRML::cleanupHook()
@@ -436,17 +434,17 @@ void JointTrajGeneratorRML::cleanupHook()
 void JointTrajGeneratorRML::rml_debug(const RTT::LoggerLevel level) {
   RTT::log(level) << "RML INPUT: "<< RTT::endlog();
   RTT::log(level) << " - NumberOfDOFs: "<<rml_in_->NumberOfDOFs << RTT::endlog();
-  RTT::log(level) << " - MinimumSynchronizationTime: "<<rml_in_->MinimumSynchronizationTime);
-  RTT::log(level) << " - SelectionVector: "<<(*rml_in_->SelectionVector) << RTT::endlog();
-  RTT::log(level) << " - CurrentPositionVector: "<<(*rml_in_->CurrentPositionVector) << RTT::endlog();
-  RTT::log(level) << " - CurrentVelocityVector: "<<(*rml_in_->CurrentVelocityVector) << RTT::endlog();
-  RTT::log(level) << " - CurrentAccelerationVector: "<<(*rml_in_->CurrentAccelerationVector) << RTT::endlog();
-  RTT::log(level) << " - MaxAccelerationVector: "<<(*rml_in_->MaxAccelerationVector) << RTT::endlog();
-  RTT::log(level) << " - MaxJerkVector: "<<(*rml_in_->MaxJerkVector) << RTT::endlog();
-  RTT::log(level) << " - TargetVelocityVector: "<<(*rml_in_->TargetVelocityVector) << RTT::endlog();
+  RTT::log(level) << " - MinimumSynchronizationTime: "<<rml_in_->MinimumSynchronizationTime << RTT::endlog();
+  RTT::log(level) << " - SelectionVector: "<<(rml_in_->SelectionVector) << RTT::endlog();
+  RTT::log(level) << " - CurrentPositionVector: "<<(rml_in_->CurrentPositionVector) << RTT::endlog();
+  RTT::log(level) << " - CurrentVelocityVector: "<<(rml_in_->CurrentVelocityVector) << RTT::endlog();
+  RTT::log(level) << " - CurrentAccelerationVector: "<<(rml_in_->CurrentAccelerationVector) << RTT::endlog();
+  RTT::log(level) << " - MaxAccelerationVector: "<<(rml_in_->MaxAccelerationVector) << RTT::endlog();
+  RTT::log(level) << " - MaxJerkVector: "<<(rml_in_->MaxJerkVector) << RTT::endlog();
+  RTT::log(level) << " - TargetVelocityVector: "<<(rml_in_->TargetVelocityVector) << RTT::endlog();
 
-  RTT::log(level) << " - MaxVelocityVector: "<<(*rml_in_->MaxVelocityVector) << RTT::endlog();
-  RTT::log(level) << " - TargetPositionVector: "<<(*rml_in_->TargetPositionVector) << RTT::endlog();
-  RTT::log(level) << " - AlternativeTargetVelocityVector: "<<(*rml_in_->AlternativeTargetVelocityVector) << RTT::endlog();
+  RTT::log(level) << " - MaxVelocityVector: "<<(rml_in_->MaxVelocityVector) << RTT::endlog();
+  RTT::log(level) << " - TargetPositionVector: "<<(rml_in_->TargetPositionVector) << RTT::endlog();
+  RTT::log(level) << " - AlternativeTargetVelocityVector: "<<(rml_in_->AlternativeTargetVelocityVector) << RTT::endlog();
 }
 
