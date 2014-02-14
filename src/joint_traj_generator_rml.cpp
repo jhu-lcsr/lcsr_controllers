@@ -44,13 +44,16 @@ JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
   this->addProperty("sampling_resolution",sampling_resolution_);
   
   // Configure data ports
-  this->ports()->addPort("joint_position_in", joint_position_in_);
-  this->ports()->addPort("joint_velocity_in", joint_velocity_in_);
-  this->ports()->addPort("joint_position_cmd_in", joint_position_cmd_in_);
+  this->ports()->addPort("joint_position_in", joint_position_in_)
+    .doc("Current joint position. (required)");
+  this->ports()->addPort("joint_velocity_in", joint_velocity_in_)
+    .doc("Current joint velocity. (required)");
+  this->ports()->addPort("joint_position_cmd_in", joint_position_cmd_in_)
+    .doc("Desired joint position, to be acquired as fast as possible.");
   this->ports()->addPort("joint_position_out", joint_position_out_)
-    .doc("Output port: nx1 vector of joint positions. (n joints)");
+    .doc("Interpolated joint position subject to velocity and acceperation limits.");
   this->ports()->addPort("joint_velocity_out", joint_velocity_out_)
-    .doc("Output port: nx1 vector of joint velocities. (n joints)");
+    .doc("Interpolated joint velocity subject to velocity and acceleration limits.");
 
   // ROS ports
   this->ports()->addPort("joint_position_cmd_ros_in", joint_position_cmd_ros_in_);
@@ -107,10 +110,11 @@ bool JointTrajGeneratorRML::configureHook()
 
   // Resize IO vectors
   joint_position_.resize(n_dof_);
+  joint_velocity_.resize(n_dof_);
+
   joint_position_last_.resize(n_dof_);
   joint_position_cmd_.resize(n_dof_);
   joint_position_sample_.resize(n_dof_);
-  joint_velocity_.resize(n_dof_);
   joint_velocity_raw_.resize(n_dof_);
   joint_velocity_sample_.resize(n_dof_);
 
@@ -189,11 +193,11 @@ void JointTrajGeneratorRML::updateHook()
   ros::Time rtt_now = rtt_rosclock::rtt_now();
 
   // Read in the current joint positions & velocities
-  RTT::FlowStatus new_position_status = joint_position_in_.readNewest(joint_position_);
-  RTT::FlowStatus new_velocity_status = joint_velocity_in_.readNewest(joint_velocity_);
+  RTT::FlowStatus position_status = joint_position_in_.readNewest(joint_position_);
+  RTT::FlowStatus velocity_status = joint_velocity_in_.readNewest(joint_velocity_);
 
-  // If we don't get any position update, we don't write any new data to the ports
-  if(new_position_status == RTT::OldData || new_velocity_status == RTT::OldData) {
+  // If we don't get a position or velocity update, we don't write any new data to the ports
+  if(position_status == RTT::OldData || velocity_status == RTT::OldData) {
     return;
   }
 
@@ -201,20 +205,24 @@ void JointTrajGeneratorRML::updateHook()
   RTT::FlowStatus point_status = joint_position_cmd_in_.readNewest( joint_position_cmd_ );
   RTT::FlowStatus traj_status = joint_traj_cmd_in_.readNewest( joint_traj_cmd_ );
 
-  bool new_reference = false;
+  // Check if there's a new desired point
   if(point_status == RTT::NewData) 
   {
-    // Handle a position given as an Eigen vector
-    ViaPoint via(n_dof_);
-    via.start_time = rtt_now;
-    via.end_time = rtt_now;
+    // Check the size of the jointspace command
     if(joint_position_cmd_.size() == n_dof_) {
-      via.positions = joint_position_;
-    }
-    vias_.clear();
-    vias_.push_back(via);
+      // Handle a position given as an Eigen vector
+      ViaPoint via(n_dof_);
+      via.start_time = rtt_now;
+      via.end_time = rtt_now;
 
+      via.positions = joint_position_;
+      vias_.clear();
+      vias_.push_back(via);
+    } else {
+      //TODO: Report warning
+    }
   } 
+  // Check if there's a new desired trajectory
   else if(traj_status == RTT::NewData) 
   {
     // TODO: Permute the joint names properly
