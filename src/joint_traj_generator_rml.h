@@ -91,8 +91,6 @@ namespace lcsr_controllers {
     sensor_msgs::JointState joint_state_desired_;
     rtt_ros_tools::PeriodicThrottle ros_publish_throttle_;
 
-    bool has_last_position_data_;
-
     // Conman interface
     boost::shared_ptr<conman::Hook> conman_hook_;
 
@@ -104,13 +102,6 @@ namespace lcsr_controllers {
     size_t n_joints_;
     std::vector<std::string> joint_names_;
 
-    size_t point_index_;
-    ros::Time commanded_start_time_;
-
-  private:
-    int loop_count_;
-    int decimation_;
-
     //! Output information about the current RML
     void rml_debug(const RTT::LoggerLevel level);
 
@@ -120,12 +111,8 @@ namespace lcsr_controllers {
     boost::shared_ptr<RMLPositionOutputParameters> rml_out_;
     RMLPositionFlags rml_flags_;
 
-    //! The last time the trajectory was recomputed
-    ros::Time active_traj_compute_time_;
-
     //! Trajectory parameters
     double sampling_resolution_;
-    bool new_reference_;
     bool recompute_trajectory_;
 
     //! A trajectory segment structure for internal use 

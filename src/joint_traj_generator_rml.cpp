@@ -383,9 +383,6 @@ void JointTrajGeneratorRML::updateHook()
         rml_in_->SetSelectionVectorElement(true,i);
       }
 
-      // Store the traj start time
-      active_traj_compute_time_ = rtt_now;
-
       // Set desired execution time for this trajectory (definitely > 0)
       rml_in_->SetMinimumSynchronizationTime(
           std::max(0.0,(active_segment.goal_time - active_segment.start_time).toSec()));
