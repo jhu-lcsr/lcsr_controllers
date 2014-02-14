@@ -60,16 +60,20 @@ namespace lcsr_controllers {
     virtual void stopHook();
     virtual void cleanupHook();
 
+    void trajectoryMsgToSegments(
+        const trajectory_msgs::JointTrajectory &msg,
+        TrajSegments &segments);
+
+    void JointTrajGeneratorRML::updateTrajectory(
+        TrajSegments &current_segments,
+        const TrajSegments &new_segments);
+
   private:
 
     // Robot model
     unsigned int n_dof_;
     KDL::Tree kdl_tree_;
     KDL::Chain kdl_chain_;
-
-    std::vector<KDL::VelocityProfile_Trap> trajectories_;
-    std::vector<RTT::Seconds> trajectory_start_times_;
-    std::vector<RTT::Seconds> trajectory_end_times_;
 
     // State
     Eigen::VectorXd
@@ -99,7 +103,6 @@ namespace lcsr_controllers {
   protected:
     size_t n_joints_;
     std::vector<std::string> joint_names_;
-    //std::vector<boost::shared_ptr<const urdf::Joint> > urdf_joints_;
 
     size_t point_index_;
     ros::Time commanded_start_time_;
@@ -127,19 +130,19 @@ namespace lcsr_controllers {
 
     //! A trajectory segment structure for internal use 
     struct TrajSegment {
-      TrajSegment(size_t n_dof, ros::Time start_time_ = ros::Time(0.0), ros::Time end_time_ = ros::Time(0.0)) :
+      TrajSegment(size_t n_dof, ros::Time start_time_ = ros::Time(0.0), ros::Time goal_time_ = ros::Time(0.0)) :
         positions(n_dof, 0.0),
         velocities(n_dof,0.0),
         accelerations(n_dof, 0.0),
         start_time(start_time_),
-        end_time(end_time_) 
+        goal_time(goal_time_) 
       { }
 
       Eigen::VectorXd goal_positions;
       Eigen::VectorXd goal_velocities;
       Eigen::VectorXd goal_accelerations;
       ros::Time start_time;
-      ros::Time end_time;
+      ros::Time goal_time;
 
       //! End-Time comparison function for binary search
       static bool StartTimeCompare(const TrajSegment &s1, const TrajSegment &s2) { 
@@ -147,8 +150,8 @@ namespace lcsr_controllers {
       }
 
       //! End-Time comparison function for binary search
-      static bool EndTimeCompare(const TrajSegment &s1, const TrajSegment &s2) { 
-        return s1.end_time < s2.end_time;
+      static bool GoalTimeCompare(const TrajSegment &s1, const TrajSegment &s2) { 
+        return s1.goal_time < s2.goal_time;
       }
     };
     
