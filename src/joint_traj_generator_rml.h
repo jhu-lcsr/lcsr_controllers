@@ -1,6 +1,6 @@
 
-#ifndef __LCSR_CONTROLLERS_JOINT_TRAJ_GENERATOR_KDL_H
-#define __LCSR_CONTROLLERS_JOINT_TRAJ_GENERATOR_KDL_H
+#ifndef __LCSR_CONTROLLERS_JOINT_TRAJ_GENERATOR_RML_H
+#define __LCSR_CONTROLLERS_JOINT_TRAJ_GENERATOR_RML_H
 
 #include <iostream>
 
@@ -99,15 +99,12 @@ namespace lcsr_controllers {
   protected:
     size_t n_joints_;
     std::vector<std::string> joint_names_;
-    std::vector<double> position_tolerances_;
-    std::vector<double> commanded_efforts_;
-    std::vector<boost::shared_ptr<const urdf::Joint> > urdf_joints_;
+    //std::vector<boost::shared_ptr<const urdf::Joint> > urdf_joints_;
 
     size_t point_index_;
     ros::Time commanded_start_time_;
 
   private:
-    ros::NodeHandle nh_;
     int loop_count_;
     int decimation_;
 
@@ -119,22 +116,18 @@ namespace lcsr_controllers {
     boost::shared_ptr<RMLPositionInputParameters> rml_in_;
     boost::shared_ptr<RMLPositionOutputParameters> rml_out_;
     RMLPositionFlags rml_flags_;
-    ros::Time traj_start_time_;
+
+    //! The last time the trajectory was recomputed
+    ros::Time active_traj_compute_time_;
 
     //! Trajectory parameters
     double sampling_resolution_;
     bool new_reference_;
     bool recompute_trajectory_;
 
-    // Command subscriber
-    ros::Subscriber trajectory_command_sub_;
-    void trajectoryCommandCB(const trajectory_msgs::JointTrajectoryConstPtr& msg);
-    void setTrajectoryCommand(const trajectory_msgs::JointTrajectoryConstPtr& msg);
-
-
-    //! A via point structure for trajectory points
-    struct ViaPoint {
-      ViaPoint(size_t n_dof, ros::Time start_time_ = ros::Time(0.0), ros::Time end_time_ = ros::Time(0.0)) :
+    //! A trajectory segment structure for internal use 
+    struct TrajSegment {
+      TrajSegment(size_t n_dof, ros::Time start_time_ = ros::Time(0.0), ros::Time end_time_ = ros::Time(0.0)) :
         positions(n_dof, 0.0),
         velocities(n_dof,0.0),
         accelerations(n_dof, 0.0),
@@ -142,31 +135,31 @@ namespace lcsr_controllers {
         end_time(end_time_) 
       { }
 
-      Eigen::VectorXd positions;
-      Eigen::VectorXd velocities;
-      Eigen::VectorXd accelerations;
+      Eigen::VectorXd goal_positions;
+      Eigen::VectorXd goal_velocities;
+      Eigen::VectorXd goal_accelerations;
       ros::Time start_time;
       ros::Time end_time;
 
       //! End-Time comparison function for binary search
-      static bool StartTimeCompare(const ViaPoint &v1, const ViaPoint &v2) { 
-        return v1.start_time < v2.start_time;
+      static bool StartTimeCompare(const TrajSegment &s1, const TrajSegment &s2) { 
+        return s1.start_time < s2.start_time;
       }
 
       //! End-Time comparison function for binary search
-      static bool EndTimeCompare(const ViaPoint &v1, const ViaPoint &v2) { 
-        return v1.end_time < v2.end_time;
+      static bool EndTimeCompare(const TrajSegment &s1, const TrajSegment &s2) { 
+        return s1.end_time < s2.end_time;
       }
     };
+    
+    typedef std::list<TrajSegment> TrajSegments;
 
-    typedef std::list<ViaPoint> Vias;
+    //! Segments to follow
+    TrajSegments segments_;
 
-    //! Via points to follow
-    Vias vias_;
-
-    bool new_via_goal_;
+    bool new_segment_goal_;
   };
 }
 
 
-#endif // ifndef __LCSR_CONTROLLERS_JOINT_TRAJ_GENERATOR_KDL_H
+#endif // ifndef __LCSR_CONTROLLERS_JOINT_TRAJ_GENERATOR_RML_H
