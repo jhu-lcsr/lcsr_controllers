@@ -36,6 +36,7 @@ namespace lcsr_controllers {
     std::string tip_link_;
     float velocity_smoothing_factor_;
     Eigen::VectorXd 
+      position_tolerance_,
       max_velocities_,
       max_accelerations_,
       max_jerks_;
@@ -60,14 +61,6 @@ namespace lcsr_controllers {
     virtual void stopHook();
     virtual void cleanupHook();
 
-    void trajectoryMsgToSegments(
-        const trajectory_msgs::JointTrajectory &msg,
-        TrajSegments &segments);
-
-    void JointTrajGeneratorRML::updateTrajectory(
-        TrajSegments &current_segments,
-        const TrajSegments &new_segments);
-
   private:
 
     // Robot model
@@ -77,16 +70,12 @@ namespace lcsr_controllers {
 
     // State
     Eigen::VectorXd
-      position_tolerance_,
       joint_position_,
-      joint_position_last_,
       joint_position_cmd_,
       joint_position_sample_,
       joint_velocity_,
-      joint_velocity_raw_,
       joint_velocity_sample_;
 
-    trajectory_msgs::JointTrajectoryPoint joint_position_cmd_ros_;
     trajectory_msgs::JointTrajectory joint_traj_cmd_;
     sensor_msgs::JointState joint_state_desired_;
     rtt_ros_tools::PeriodicThrottle ros_publish_throttle_;
@@ -101,6 +90,7 @@ namespace lcsr_controllers {
   protected:
     size_t n_joints_;
     std::vector<std::string> joint_names_;
+    std::map<std::string,size_t> joint_name_index_map_;
 
     //! Output information about the current RML
     void rml_debug(const RTT::LoggerLevel level);
@@ -116,20 +106,27 @@ namespace lcsr_controllers {
     bool recompute_trajectory_;
 
     //! A trajectory segment structure for internal use 
-    struct TrajSegment {
+    // This structure is used so that trajectory points can be decoupled from
+    // each-other. The standard ROS trajectory message includes a timestamp
+    // designating the start time, and then each point in the trajectory is
+    // stamped relative to that one. Since this controller may splice different
+    // trajectories together, re first translate them into an absolute
+    // representation, where each point has a well-defined start and end time.
+    struct TrajSegment 
+    {
       TrajSegment(size_t n_dof, ros::Time start_time_ = ros::Time(0.0), ros::Time goal_time_ = ros::Time(0.0)) :
-        positions(n_dof, 0.0),
-        velocities(n_dof,0.0),
-        accelerations(n_dof, 0.0),
         start_time(start_time_),
-        goal_time(goal_time_) 
+        goal_time(goal_time_), 
+        goal_positions(n_dof, 0.0),
+        goal_velocities(n_dof,0.0),
+        goal_accelerations(n_dof, 0.0)
       { }
 
+      ros::Time start_time;
+      ros::Time goal_time;
       Eigen::VectorXd goal_positions;
       Eigen::VectorXd goal_velocities;
       Eigen::VectorXd goal_accelerations;
-      ros::Time start_time;
-      ros::Time goal_time;
 
       //! End-Time comparison function for binary search
       static bool StartTimeCompare(const TrajSegment &s1, const TrajSegment &s2) { 
@@ -142,12 +139,21 @@ namespace lcsr_controllers {
       }
     };
     
+    //! A container of trajectory segments with low complexity front and back modification
     typedef std::list<TrajSegment> TrajSegments;
 
     //! Segments to follow
     TrajSegments segments_;
 
-    bool new_segment_goal_;
+    static bool TrajectoryMsgToSegments(
+        const trajectory_msgs::JointTrajectory &msg,
+        const size_t n_dof,
+        const ros::Time rtt_now,
+        TrajSegments &segments);
+
+    static void UpdateTrajectory(
+        TrajSegments &current_segments,
+        const TrajSegments &new_segments);
   };
 }
 

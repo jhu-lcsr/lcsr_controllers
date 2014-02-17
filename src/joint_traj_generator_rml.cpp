@@ -110,10 +110,8 @@ bool JointTrajGeneratorRML::configureHook()
   joint_position_.resize(n_dof_);
   joint_velocity_.resize(n_dof_);
 
-  joint_position_last_.resize(n_dof_);
   joint_position_cmd_.resize(n_dof_);
   joint_position_sample_.resize(n_dof_);
-  joint_velocity_raw_.resize(n_dof_);
   joint_velocity_sample_.resize(n_dof_);
 
   position_tolerance_ = Eigen::VectorXd::Constant(n_dof_,0.0);
@@ -121,10 +119,10 @@ bool JointTrajGeneratorRML::configureHook()
   max_accelerations_ = Eigen::VectorXd::Constant(n_dof_,0.0);
   max_jerks_ = Eigen::VectorXd::Constant(n_dof_,0.0);
 
+  rosparam->getComponentPrivate("position_tolerance");
   rosparam->getComponentPrivate("max_velocities");
   rosparam->getComponentPrivate("max_accelerations");
   rosparam->getComponentPrivate("max_jerks");
-  rosparam->getComponentPrivate("position_tolerance");
   rosparam->getComponentPrivate("sampling_resolution");
 
   // Create trajectory generator
@@ -134,6 +132,8 @@ bool JointTrajGeneratorRML::configureHook()
 
   // Get individual joint properties from urdf and parameter server
   joint_names_.resize(n_dof_);
+
+  // Generate joint map here
 
   for(size_t j = 0; j < n_dof_; j++)
   { 
@@ -166,7 +166,7 @@ bool JointTrajGeneratorRML::startHook()
   return true;
 }
 
-void JointTrajGeneratorRML::updateTrajectory(
+void JointTrajGeneratorRML::UpdateTrajectory(
     JointTrajGeneratorRML::TrajSegments &current_segments,
     const JointTrajGeneratorRML::TrajSegments &new_segments)
 {
@@ -182,11 +182,16 @@ void JointTrajGeneratorRML::updateTrajectory(
   current_segments.erase(insertion_range.first, current_segments.end());
 
   // Add the new segments to the end of the trajectory
-  current_segments.insert(insertion_range.end(), new_segments.begin(), new_segments.end());
+  current_segments.insert(
+      insertion_range.second, 
+      new_segments.begin(), 
+      new_segments.end());
 }
 
-void JointTrajGeneratorRML::trajectoryMsgToSegments(
+bool JointTrajGeneratorRML::TrajectoryMsgToSegments(
     const trajectory_msgs::JointTrajectory &msg,
+    const size_t n_dof,
+    const ros::Time rtt_now,
     TrajSegments &segments)
 {
   // Clear the output segment list
@@ -195,8 +200,8 @@ void JointTrajGeneratorRML::trajectoryMsgToSegments(
   // TODO: Permute the joint names properly
   
   // Make sure the traj isn't empty
-  if(joint_traj_cmd_.points.size() == 0) {
-    return;
+  if(msg.points.size() == 0) {
+    return false;
   }
 
   // It's assumed that the header timestamp is when this new
@@ -212,14 +217,14 @@ void JointTrajGeneratorRML::trajectoryMsgToSegments(
   ros::Time new_traj_start_time = rtt_now;
 
   // If the header stamp is non-zero, then determine which points we should pursue
-  if(!joint_traj_cmd_.header.stamp.isZero()) {
+  if(!msg.header.stamp.isZero()) {
     // Offset the NTP-corrected time to get the RTT-time
-    new_traj_start_time = joint_traj_cmd_.header.stamp - ros::Duration(rtt_rosclock::host_rt_offset_from_rtt());
+    new_traj_start_time = msg.header.stamp - ros::Duration(rtt_rosclock::host_rt_offset_from_rtt());
   }
 
   // Convert the ROS joint trajectory to a set of Eigen TrajSegment structures
-  for(std::vector<trajectory_msgs::JointTrajectoryPoint>::const_iterator it = joint_traj_cmd_.points.begin();
-      it != joint_traj_cmd_.points.end();
+  for(std::vector<trajectory_msgs::JointTrajectoryPoint>::const_iterator it = msg.points.begin();
+      it != msg.points.end();
       ++it) 
   {
     ros::Time new_segment_start_time;
@@ -227,25 +232,27 @@ void JointTrajGeneratorRML::trajectoryMsgToSegments(
     // Compute the start time for the new segment. If this is the first
     // point, then it's the trajectory start time. Otherwise, it's the end
     // time of the preceeding point.
-    if(it == joint_traj_cmd_.points.begin()) {
+    if(it == msg.points.begin()) {
       new_segment_start_time = new_traj_start_time;
     } else {
-      new_segment_start_time = new_segments.back().goal_time;
+      new_segment_start_time = segments.back().goal_time;
     }
 
     // Create and add the new segment 
-    new_segments.push_back(
+    segments.push_back(
         TrajSegment(
-            n_dof_, 
+            n_dof, 
             new_segment_start_time, 
             new_traj_start_time + it->time_from_start));
 
     // Copy in the data
-    TrajSegment &new_segment = new_segments.back();
-    if(it->positions.size() == n_dof_) std::copy(it->positions.begin(), it->positions.end(), new_segment.goal_positions.data());
-    if(it->velocities.size() == n_dof_) std::copy(it->velocities.begin(), it->velocities.end(), new_segment.goal_velocities.data());
-    if(it->accelerations.size() == n_dof_) std::copy(it->accelerations.begin(), it->accelerations.end(), new_segment.goal_accelerations.data());
+    TrajSegment &new_segment = segments.back();
+    if(it->positions.size() == n_dof) std::copy(it->positions.begin(), it->positions.end(), new_segment.goal_positions.data());
+    if(it->velocities.size() == n_dof) std::copy(it->velocities.begin(), it->velocities.end(), new_segment.goal_velocities.data());
+    if(it->accelerations.size() == n_dof) std::copy(it->accelerations.begin(), it->accelerations.end(), new_segment.goal_accelerations.data());
   }
+
+  return true;
 }
 
 void JointTrajGeneratorRML::updateHook()
@@ -291,7 +298,7 @@ void JointTrajGeneratorRML::updateHook()
       segments_.clear();
       segments_.push_back(segment);
 
-      new_segment_goal_ = true;
+      recompute_trajectory_ = true;
     } else {
       //TODO: Report warning
     }
@@ -301,10 +308,10 @@ void JointTrajGeneratorRML::updateHook()
   {
     // Convert the trajectory message to a list of segments for splicing
     TrajSegments new_segments;
-    this->trajectoryMsgToSegments(joint_traj_cmd_, new_segments);
+    TrajectoryMsgToSegments(joint_traj_cmd_, n_dof_, rtt_now, new_segments);
     
     // Update the trajectory
-    this->updateTrajectory(segments_, new_segments);
+    UpdateTrajectory(segments_, new_segments);
   }
 
   /** After this point, only work in TrajSegment structures **/
@@ -321,11 +328,12 @@ void JointTrajGeneratorRML::updateHook()
     // Mark this segment for removal if it's expired or if we need to start processing the next one
     if(it->goal_time <= rtt_now || (next != segments_.end() && next->start_time <= rtt_now)) {
       erase_it = it;
-      new_segment_goal_ = true;
+      recompute_trajectory_ = true;
     }
   }
 
-  if(new_segment_goal_) {
+  // Check if there's a new active segment
+  if(recompute_trajectory_) {
     // Remove the segments whose end times are in the past
     segments_.erase(segments_.begin(), erase_it);
   }
@@ -336,28 +344,12 @@ void JointTrajGeneratorRML::updateHook()
     // Get a reference to the active segment
     TrajSegment &active_segment = segments_.front();
 
-    // Check for a new reference
-    if(new_segment_goal_) 
-    {
-      // Reset new reference flag
-      new_segment_goal_ = false;
-      // Set flag to recompute trajectory
-      recompute_trajectory_ = true;
-      // Store the actual start time
-      /*
-       *active_segment.start_time = rtt_now;
-       */
-
-      RTT::log(RTT::Debug) << ("Received new segment goal.") << RTT::endlog();
-    }
-
     // Determine if any of the joint tolerances have been violated (this means we need to recompute the traj)
     for(int i=0; i<n_dof_; i++) 
     {
       double tracking_error = std::abs(rml_out_->GetNewPositionVectorElement(i) - joint_position_[i]);
       if(tracking_error > position_tolerance_[i]) {
         recompute_trajectory_ = true;
-        //ROS_WARN_STREAM("Tracking for joint "<<i<<" outside of tolerance! ("<<tracking_error<<" > "<<position_tolerance_[i]<<")");
       }
     }
 
@@ -378,7 +370,6 @@ void JointTrajGeneratorRML::updateHook()
 
         rml_in_->SetTargetPositionVectorElement(active_segment.goal_positions(i), i);
         rml_in_->SetTargetVelocityVectorElement(active_segment.goal_velocities(i), i);
-        rml_in_->SetTargetAccelerationVectorElement(active_segment.goal_accelerations(i), i);
 
         rml_in_->SetSelectionVectorElement(true,i);
       }
