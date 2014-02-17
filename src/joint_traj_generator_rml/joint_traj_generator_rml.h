@@ -105,6 +105,7 @@ namespace lcsr_controllers {
     double sampling_resolution_;
     bool recompute_trajectory_;
 
+  public:
     //! A trajectory segment structure for internal use 
     // This structure is used so that trajectory points can be decoupled from
     // each-other. The standard ROS trajectory message includes a timestamp
@@ -117,10 +118,14 @@ namespace lcsr_controllers {
       TrajSegment(size_t n_dof, ros::Time start_time_ = ros::Time(0.0), ros::Time goal_time_ = ros::Time(0.0)) :
         start_time(start_time_),
         goal_time(goal_time_), 
-        goal_positions(n_dof, 0.0),
-        goal_velocities(n_dof,0.0),
-        goal_accelerations(n_dof, 0.0)
-      { }
+        goal_positions(n_dof),
+        goal_velocities(n_dof),
+        goal_accelerations(n_dof)
+      {
+        goal_positions.setZero();
+        goal_velocities.setZero();
+        goal_accelerations.setZero();
+      }
 
       ros::Time start_time;
       ros::Time goal_time;
@@ -148,7 +153,7 @@ namespace lcsr_controllers {
     static bool TrajectoryMsgToSegments(
         const trajectory_msgs::JointTrajectory &msg,
         const size_t n_dof,
-        const ros::Time rtt_now,
+        const ros::Time trajectory_start_time,
         TrajSegments &segments);
 
     static void UpdateTrajectory(

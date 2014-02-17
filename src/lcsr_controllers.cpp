@@ -4,7 +4,7 @@
 #include "id_controller_kdl.h"
 #include "joint_pid_controller.h"
 #include "joint_traj_generator_kdl.h"
-#include "joint_traj_generator_rml.h"
+#include "joint_traj_generator_rml/joint_traj_generator_rml.h"
 #include "semi_absolute_calibration_controller.h"
 #include "jt_nullspace_controller.h"
 

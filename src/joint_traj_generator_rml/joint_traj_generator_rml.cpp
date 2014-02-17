@@ -191,7 +191,7 @@ void JointTrajGeneratorRML::UpdateTrajectory(
 bool JointTrajGeneratorRML::TrajectoryMsgToSegments(
     const trajectory_msgs::JointTrajectory &msg,
     const size_t n_dof,
-    const ros::Time rtt_now,
+    const ros::Time new_traj_start_time,
     TrajSegments &segments)
 {
   // Clear the output segment list
@@ -214,13 +214,7 @@ bool JointTrajGeneratorRML::TrajectoryMsgToSegments(
   // the start time has passed.
 
   // By default, start the trajectory now (header stamp is zero)
-  ros::Time new_traj_start_time = rtt_now;
-
-  // If the header stamp is non-zero, then determine which points we should pursue
-  if(!msg.header.stamp.isZero()) {
-    // Offset the NTP-corrected time to get the RTT-time
-    new_traj_start_time = msg.header.stamp - ros::Duration(rtt_rosclock::host_rt_offset_from_rtt());
-  }
+  //ros::Time new_traj_start_time = rtt_now;
 
   // Convert the ROS joint trajectory to a set of Eigen TrajSegment structures
   for(std::vector<trajectory_msgs::JointTrajectoryPoint>::const_iterator it = msg.points.begin();
@@ -306,9 +300,25 @@ void JointTrajGeneratorRML::updateHook()
   // Check if there's a new desired trajectory
   else if(traj_status == RTT::NewData) 
   {
-    // Convert the trajectory message to a list of segments for splicing
+    // Create a new list of segments to be spliced in
     TrajSegments new_segments;
-    TrajectoryMsgToSegments(joint_traj_cmd_, n_dof_, rtt_now, new_segments);
+    // By default, set the start time to now
+    ros::Time new_traj_start_time = rtt_now;
+
+    // If the header stamp is non-zero, then determine which points we should pursue
+    if(!joint_traj_cmd_.header.stamp.isZero()) {
+      // Offset the NTP-corrected time to get the RTT-time
+      // Correct the timestamp so that its relative to the realtime clock
+      // TODO: make it so this can be disabled or make two different ports
+      new_traj_start_time = joint_traj_cmd_.header.stamp - ros::Duration(rtt_rosclock::host_rt_offset_from_rtt());
+    }
+
+    // Convert the trajectory message to a list of segments for splicing
+    TrajectoryMsgToSegments(
+        joint_traj_cmd_, 
+        n_dof_, 
+        new_traj_start_time, 
+        new_segments);
     
     // Update the trajectory
     UpdateTrajectory(segments_, new_segments);
