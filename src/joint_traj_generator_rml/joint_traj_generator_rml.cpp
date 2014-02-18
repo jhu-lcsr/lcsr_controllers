@@ -166,10 +166,15 @@ bool JointTrajGeneratorRML::startHook()
   return true;
 }
 
-void JointTrajGeneratorRML::UpdateTrajectory(
+bool JointTrajGeneratorRML::UpdateTrajectory(
     JointTrajGeneratorRML::TrajSegments &current_segments,
     const JointTrajGeneratorRML::TrajSegments &new_segments)
 {
+  // Make sure there are new segments
+  if(new_segments.begin() == new_segments.end()) {
+    return false;
+  }
+
   // Determine where the segments should begin to be inserted in the current trajectory via binary search
   std::pair<TrajSegments::iterator, TrajSegments::iterator> insertion_range = 
     std::equal_range(
@@ -183,9 +188,11 @@ void JointTrajGeneratorRML::UpdateTrajectory(
 
   // Add the new segments to the end of the trajectory
   current_segments.insert(
-      insertion_range.second, 
+      current_segments.end(), 
       new_segments.begin(), 
       new_segments.end());
+
+  return true;
 }
 
 bool JointTrajGeneratorRML::TrajectoryMsgToSegments(

@@ -156,7 +156,7 @@ namespace lcsr_controllers {
         const ros::Time trajectory_start_time,
         TrajSegments &segments);
 
-    static void UpdateTrajectory(
+    static bool UpdateTrajectory(
         TrajSegments &current_segments,
         const TrajSegments &new_segments);
   };

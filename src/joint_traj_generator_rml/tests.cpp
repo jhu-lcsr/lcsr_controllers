@@ -31,18 +31,25 @@ using namespace lcsr_controllers;
 class StaticTest : public ::testing::Test {
 public:
   size_t n_dof;
+  double t_step;
+  size_t n_base_traj_points;
   trajectory_msgs::JointTrajectory traj_msg;
   ros::Time now;
 
   StaticTest() :
     ::testing::Test(),
+    t_step(1.0),
+    n_base_traj_points(10),
     n_dof(7),
     traj_msg(),
     now(1000,1000)
   { 
     // create a sinusoidal trajectory
-    for(double t=0; t < 1.0; t+=0.2) {
+    for(int i=0; i <n_base_traj_points; i++) {
       trajectory_msgs::JointTrajectoryPoint point;
+
+      double t = 1.0 + i*t_step;
+
       point.time_from_start = ros::Duration(t);
       point.positions.resize(n_dof);
       point.velocities.resize(n_dof);
@@ -68,7 +75,7 @@ TEST_F(StaticTest, NowMsgConversion)
       segments);
 
   // Verify that the right number of points were copied
-  EXPECT_EQ(segments.size(),5);
+  EXPECT_EQ(segments.size(),n_base_traj_points);
   ASSERT_EQ(segments.size(),traj_msg.points.size());
 
   // Verify that everything got copied properly
@@ -89,18 +96,65 @@ TEST_F(StaticTest, NowMsgConversion)
   }
 }
 
-#if 0
-TEST_F(StaticTest, TrajectorySplicing) 
+TEST_F(StaticTest, SpliceLaterTrajectory) 
 {
-  // convert the trajectory message into a list of trajectory segments
   JointTrajGeneratorRML::TrajSegments segments_current, segments_new;
   JointTrajGeneratorRML::TrajectoryMsgToSegments(
       traj_msg,
       n_dof,
       now,
       segments_current);
+
+  JointTrajGeneratorRML::TrajectoryMsgToSegments(
+      traj_msg,
+      n_dof,
+      now + ros::Duration(10.0),
+      segments_new);
+
+  JointTrajGeneratorRML::UpdateTrajectory(segments_current, segments_new);
+
+  EXPECT_EQ(segments_current.size(),2*n_base_traj_points); 
 }
-#endif
+
+TEST_F(StaticTest, SpliceEarlierTrajectory) 
+{
+  JointTrajGeneratorRML::TrajSegments segments_current, segments_new;
+  JointTrajGeneratorRML::TrajectoryMsgToSegments(
+      traj_msg,
+      n_dof,
+      now,
+      segments_current);
+
+  JointTrajGeneratorRML::TrajectoryMsgToSegments(
+      traj_msg,
+      n_dof,
+      now + ros::Duration(-5.0),
+      segments_new);
+
+  JointTrajGeneratorRML::UpdateTrajectory(segments_current, segments_new);
+
+  EXPECT_EQ(segments_current.size(),n_base_traj_points); 
+}
+
+TEST_F(StaticTest, SpliceInterruptingTrajectory) 
+{
+  JointTrajGeneratorRML::TrajSegments segments_current, segments_new;
+  JointTrajGeneratorRML::TrajectoryMsgToSegments(
+      traj_msg,
+      n_dof,
+      now,
+      segments_current);
+
+  JointTrajGeneratorRML::TrajectoryMsgToSegments(
+      traj_msg,
+      n_dof,
+      now + ros::Duration(+5.0),
+      segments_new);
+
+  JointTrajGeneratorRML::UpdateTrajectory(segments_current, segments_new);
+
+  EXPECT_EQ(segments_current.size(),1.5*n_base_traj_points); 
+}
 
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
