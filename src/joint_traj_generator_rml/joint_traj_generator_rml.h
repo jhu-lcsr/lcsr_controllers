@@ -49,7 +49,7 @@ namespace lcsr_controllers {
     RTT::OutputPort<Eigen::VectorXd> joint_position_out_;
     RTT::OutputPort<Eigen::VectorXd> joint_velocity_out_;
 
-    RTT::InputPort<trajectory_msgs::JointTrajectoryPoint> joint_position_cmd_ros_in_;
+    RTT::InputPort<trajectory_msgs::JointTrajectoryPoint> joint_traj_point_cmd_in_;
     RTT::InputPort<trajectory_msgs::JointTrajectory> joint_traj_cmd_in_;
     RTT::OutputPort<sensor_msgs::JointState> joint_state_desired_out_;
 
@@ -76,6 +76,7 @@ namespace lcsr_controllers {
       joint_velocity_,
       joint_velocity_sample_;
 
+    trajectory_msgs::JointTrajectoryPoint joint_traj_point_cmd_;
     trajectory_msgs::JointTrajectory joint_traj_cmd_;
     sensor_msgs::JointState joint_state_desired_;
     rtt_ros_tools::PeriodicThrottle ros_publish_throttle_;
@@ -86,6 +87,7 @@ namespace lcsr_controllers {
     //////////////////////////////////////////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////////////////////////
+    //
 
   protected:
     size_t n_joints_;
@@ -115,7 +117,7 @@ namespace lcsr_controllers {
     // representation, where each point has a well-defined start and end time.
     struct TrajSegment 
     {
-      TrajSegment(size_t n_dof, ros::Time start_time_ = ros::Time(0.0), ros::Time goal_time_ = ros::Time(0.0)) :
+      TrajSegment(size_t n_dof, ros::Time start_time_ = ros::Time(0,0), ros::Time goal_time_ = ros::Time(0,0)) :
         start_time(start_time_),
         goal_time(goal_time_), 
         goal_positions(n_dof),
@@ -159,6 +161,16 @@ namespace lcsr_controllers {
     static bool UpdateTrajectory(
         TrajSegments &current_segments,
         const TrajSegments &new_segments);
+    
+    bool sampleTrajectory(
+        const ros::Time rtt_now,
+        const bool force_recompute_trajectory,
+        JointTrajGeneratorRML::TrajSegments &segments,
+        boost::shared_ptr<ReflexxesAPI> rml,
+        boost::shared_ptr<RMLPositionInputParameters> rml_in,
+        boost::shared_ptr<RMLPositionOutputParameters> rml_out,
+        Eigen::VectorXd &joint_position_sample,
+        Eigen::VectorXd &joint_velocity_sample);
   };
 }
 

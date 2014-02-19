@@ -59,7 +59,7 @@ JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
     .doc("Interpolated joint velocity subject to velocity and acceleration limits.");
 
   // ROS ports
-  this->ports()->addPort("joint_position_cmd_ros_in", joint_position_cmd_ros_in_);
+  this->ports()->addPort("joint_traj_point_cmd_in", joint_traj_point_cmd_in_);
   this->ports()->addPort("joint_traj_cmd_in", joint_traj_cmd_in_);
   this->ports()->addPort("joint_state_desired_out", joint_state_desired_out_);
 
@@ -68,7 +68,6 @@ JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
   conman_hook_->setInputExclusivity("joint_position_in", conman::Exclusivity::EXCLUSIVE);
   conman_hook_->setInputExclusivity("joint_velocity_in", conman::Exclusivity::EXCLUSIVE);
   conman_hook_->setInputExclusivity("joint_position_cmd_in", conman::Exclusivity::EXCLUSIVE);
-  conman_hook_->setInputExclusivity("joint_position_cmd_ros_in", conman::Exclusivity::EXCLUSIVE);
 }
 
 bool JointTrajGeneratorRML::configureHook()
@@ -82,7 +81,8 @@ bool JointTrajGeneratorRML::configureHook()
     return false;
   }
 
-  if(!joint_position_cmd_ros_in_.createStream(rostopic.connection("~" + this->getName() + "/joint_position_cmd"))
+  if(   !joint_traj_cmd_in_.createStream(rostopic.connection("~" + this->getName() + "/joint_traj_cmd"))
+     || !joint_traj_point_cmd_in_.createStream(rostopic.connection("~" + this->getName() + "/joint_traj_point_cmd"))
      || !joint_state_desired_out_.createStream(rostopic.connection("~" + this->getName() + "/joint_state_desired")))
   {
     RTT::log(RTT::Error) << "ROS Topics could not be streamed..." <<RTT::endlog();
@@ -256,6 +256,136 @@ bool JointTrajGeneratorRML::TrajectoryMsgToSegments(
   return true;
 }
 
+bool JointTrajGeneratorRML::sampleTrajectory(
+    const ros::Time rtt_now,
+    const bool force_recompute_trajectory,
+    JointTrajGeneratorRML::TrajSegments &segments,
+    boost::shared_ptr<ReflexxesAPI> rml,
+    boost::shared_ptr<RMLPositionInputParameters> rml_in,
+    boost::shared_ptr<RMLPositionOutputParameters> rml_out,
+    Eigen::VectorXd &joint_position_sample,
+    Eigen::VectorXd &joint_velocity_sample)
+{
+
+  bool recompute_trajectory = force_recompute_trajectory;
+
+  /** After this point, only work in TrajSegment structures **/
+
+  // Find segments which should be removed
+  // - segments with non-zero start and goal times
+  // - segments whose goal times are in the past
+  // - segments before segments whose start times are now or in the past
+  //
+  // This means that if a trajectory is full of zero-length segments, it will 
+  // be executed as quickly as possible.
+  TrajSegments::iterator erase_it = segments.begin();
+  for(TrajSegments::iterator it = segments.begin(); it != segments.end(); ++it) 
+  {
+    // Peek at the next segment
+    TrajSegments::iterator next = it;  ++next;
+
+    // Mark this segment for removal if it's expired or if we need to start processing the next one
+    if(it->goal_time <= rtt_now || (next != segments.end() && next->start_time <= rtt_now)) {
+      erase_it = it;
+      recompute_trajectory = true;
+    }
+  }
+
+  // Check if there's a new active segment
+  if(recompute_trajectory) {
+    // Remove the segments whose end times are in the past
+    segments.erase(segments.begin(), erase_it);
+  }
+
+  // Check if there are any more segments to process and if we should start processing them
+  if(segments.size() > 0 && segments.front().start_time <= rtt_now) 
+  {
+    // Get a reference to the active segment
+    TrajSegment &active_segment = segments.front();
+
+    // Determine if any of the joint tolerances have been violated (this means we need to recompute the traj)
+    for(int i=0; i<n_dof_; i++) 
+    {
+      double tracking_error = std::abs(rml_out->GetNewPositionVectorElement(i) - joint_position_[i]);
+      if(tracking_error > position_tolerance_[i]) {
+        recompute_trajectory = true;
+      }
+    }
+
+    // Initialize RML result
+    int rml_result = 0;
+
+    // Compute RML traj after the start time and if there are still points in the queue
+    if(recompute_trajectory) 
+    {
+      // Compute the trajectory
+      RTT::log(RTT::Debug) << ("RML Recomputing trajectory...") << RTT::endlog(); 
+      
+      // Set segment start time
+      active_segment.start_time = rtt_now;
+
+      // Update RML input parameters
+      for(size_t i=0; i<n_dof_; i++) {
+        rml_in->SetCurrentPositionVectorElement(joint_position_(i), i);
+        rml_in->SetCurrentVelocityVectorElement(joint_velocity_(i), i);
+        rml_in->SetCurrentAccelerationVectorElement(0.0, i);
+
+        rml_in->SetTargetPositionVectorElement(active_segment.goal_positions(i), i);
+        rml_in->SetTargetVelocityVectorElement(active_segment.goal_velocities(i), i);
+
+        rml_in->SetSelectionVectorElement(true,i);
+      }
+
+      // Set desired execution time for this trajectory (definitely > 0)
+      rml_in->SetMinimumSynchronizationTime(
+          std::max(0.0,(active_segment.goal_time - active_segment.start_time).toSec()));
+
+      RTT::log(RTT::Debug) << "RML IN: time: "<<rml_in->GetMinimumSynchronizationTime() << RTT::endlog();
+
+      // Hold fixed at final point once trajectory is complete
+      rml_flags_.BehaviorAfterFinalStateOfMotionIsReached = RMLPositionFlags::RECOMPUTE_TRAJECTORY;
+      rml_flags_.SynchronizationBehavior = RMLPositionFlags::ONLY_TIME_SYNCHRONIZATION;
+
+      // Compute trajectory
+      rml_result = rml->RMLPosition(
+          *rml_in.get(), 
+          rml_out.get(), 
+          rml_flags_);
+    } 
+    else 
+    {
+      // Sample the already computed trajectory
+      rml_result = rml->RMLPositionAtAGivenSampleTime(
+          (rtt_now - active_segment.start_time).toSec(),
+          rml_out.get());
+    }
+
+    // Only set a non-zero effort command if the 
+    switch(rml_result) 
+    {
+      case ReflexxesAPI::RML_WORKING:
+        // S'all good.
+        break;
+      case ReflexxesAPI::RML_FINAL_STATE_REACHED:
+        // Remove the active segment from the trajectory
+        segments.pop_front();
+        break;
+      default:
+        RTT::log(RTT::Error) << "Reflexxes error code: "<<rml_result<<". Entering error state and not writing a desired position." << RTT::endlog();
+        return false;
+        break;
+    };
+
+    // Get the new sampled reference
+    for(size_t i=0; i<n_dof_; i++) {
+      joint_position_sample_(i) = rml_out->GetNewPositionVectorElement(i);
+      joint_velocity_sample_(i) = rml_out->GetNewVelocityVectorElement(i);
+    }
+  }
+
+  return true;
+}
+
 void JointTrajGeneratorRML::updateHook()
 {
   // Get the current and the time since the last update
@@ -277,6 +407,7 @@ void JointTrajGeneratorRML::updateHook()
 
   // Read in any newly commanded joint positions 
   RTT::FlowStatus point_status = joint_position_cmd_in_.readNewest( joint_position_cmd_ );
+  RTT::FlowStatus traj_point_status = joint_traj_point_cmd_in_.readNewest( joint_traj_point_cmd_ );
   RTT::FlowStatus traj_status = joint_traj_cmd_in_.readNewest( joint_traj_cmd_ );
 
   // Do nothing and generate no output if there's no command
@@ -285,6 +416,9 @@ void JointTrajGeneratorRML::updateHook()
     return;
   }
 
+  // Flag to force recomputation of the trajectory
+  bool recompute_trajectory = false;
+
   // Check if there's a new desired point
   if(point_status == RTT::NewData) 
   {
@@ -292,18 +426,35 @@ void JointTrajGeneratorRML::updateHook()
     if(joint_position_cmd_.size() == n_dof_) {
       // Handle a position given as an Eigen vector
       TrajSegment segment(n_dof_);
-      segment.start_time = rtt_now;
-      segment.goal_time = rtt_now;
 
       segment.goal_positions = joint_position_;
       segments_.clear();
       segments_.push_back(segment);
 
-      recompute_trajectory_ = true;
+      // Set the recompute flag
+      recompute_trajectory = true;
     } else {
       //TODO: Report warning
     }
   } 
+  // Check if there's a new desired trajectory point
+  else if(traj_point_status == RTT::NewData) 
+  {
+    // Create a unary trajectory
+    trajectory_msgs::JointTrajectory unary_joint_traj;
+    unary_joint_traj.points.push_back(joint_traj_point_cmd_);
+
+    // Convert the trajectory message to a list of segments for splicing
+    segments_.clear();
+    TrajectoryMsgToSegments(
+        unary_joint_traj, 
+        n_dof_, 
+        ros::Time(0,0), 
+        segments_);
+    
+    // Set the recompute flag
+    recompute_trajectory = true;
+  }
   // Check if there's a new desired trajectory
   else if(traj_status == RTT::NewData) 
   {
@@ -331,115 +482,18 @@ void JointTrajGeneratorRML::updateHook()
     UpdateTrajectory(segments_, new_segments);
   }
 
-  /** After this point, only work in TrajSegment structures **/
+  // Sample the trajectory from segments_
+  bool sampling_succeeded = 
+    this->sampleTrajectory(
+        rtt_now, recompute_trajectory,
+        segments_,
+        rml_, rml_in_, rml_out_,
+        joint_position_sample_,
+        joint_velocity_sample_);
 
-  // Find segments which should be removed
-  // - segments whose goal times are in the past
-  // - segments before segments whose start times are now or in the past
-  TrajSegments::iterator erase_it = segments_.begin();
-  for(TrajSegments::iterator it = segments_.begin(); it != segments_.end(); ++it) 
-  {
-    // Peek at the next segment
-    TrajSegments::iterator next = it;  ++next;
-    
-    // Mark this segment for removal if it's expired or if we need to start processing the next one
-    if(it->goal_time <= rtt_now || (next != segments_.end() && next->start_time <= rtt_now)) {
-      erase_it = it;
-      recompute_trajectory_ = true;
-    }
-  }
-
-  // Check if there's a new active segment
-  if(recompute_trajectory_) {
-    // Remove the segments whose end times are in the past
-    segments_.erase(segments_.begin(), erase_it);
-  }
-
-  // Check if there are any more segments to process and if we should start processing them
-  if(segments_.size() > 0 && segments_.front().start_time <= rtt_now) 
-  {
-    // Get a reference to the active segment
-    TrajSegment &active_segment = segments_.front();
-
-    // Determine if any of the joint tolerances have been violated (this means we need to recompute the traj)
-    for(int i=0; i<n_dof_; i++) 
-    {
-      double tracking_error = std::abs(rml_out_->GetNewPositionVectorElement(i) - joint_position_[i]);
-      if(tracking_error > position_tolerance_[i]) {
-        recompute_trajectory_ = true;
-      }
-    }
-
-    // Initialize RML result
-    int rml_result = 0;
-
-    // Compute RML traj after the start time and if there are still points in the queue
-    if(recompute_trajectory_) 
-    {
-      // Compute the trajectory
-      RTT::log(RTT::Debug) << ("RML Recomputing trajectory...") << RTT::endlog(); 
-
-      // Update RML input parameters
-      for(size_t i=0; i<n_dof_; i++) {
-        rml_in_->SetCurrentPositionVectorElement(joint_position_(i), i);
-        rml_in_->SetCurrentVelocityVectorElement(joint_velocity_(i), i);
-        rml_in_->SetCurrentAccelerationVectorElement(0.0, i);
-
-        rml_in_->SetTargetPositionVectorElement(active_segment.goal_positions(i), i);
-        rml_in_->SetTargetVelocityVectorElement(active_segment.goal_velocities(i), i);
-
-        rml_in_->SetSelectionVectorElement(true,i);
-      }
-
-      // Set desired execution time for this trajectory (definitely > 0)
-      rml_in_->SetMinimumSynchronizationTime(
-          std::max(0.0,(active_segment.goal_time - active_segment.start_time).toSec()));
-
-      RTT::log(RTT::Debug) << "RML IN: time: "<<rml_in_->GetMinimumSynchronizationTime() << RTT::endlog();
-
-      // Hold fixed at final point once trajectory is complete
-      rml_flags_.BehaviorAfterFinalStateOfMotionIsReached = RMLPositionFlags::RECOMPUTE_TRAJECTORY;
-      rml_flags_.SynchronizationBehavior = RMLPositionFlags::ONLY_TIME_SYNCHRONIZATION;
-
-      // Compute trajectory
-      rml_result = rml_->RMLPosition(
-          *rml_in_.get(), 
-          rml_out_.get(), 
-          rml_flags_);
-
-      // Disable recompute flag
-      recompute_trajectory_ = false;
-    } 
-    else 
-    {
-      // Sample the already computed trajectory
-      rml_result = rml_->RMLPositionAtAGivenSampleTime(
-          (rtt_now - active_segment.start_time).toSec(),
-          rml_out_.get());
-    }
-
-    // Only set a non-zero effort command if the 
-    switch(rml_result) 
-    {
-      case ReflexxesAPI::RML_WORKING:
-        // S'all good.
-        break;
-      case ReflexxesAPI::RML_FINAL_STATE_REACHED:
-        // Remove the active segment from the trajectory
-        segments_.pop_front();
-        break;
-      default:
-        RTT::log(RTT::Error) << "Reflexxes error code: "<<rml_result<<". Not writing a desired position." << RTT::endlog();
-        this->error();
-        return;
-        break;
-    };
-
-    // Get the new sampled reference
-    for(size_t i=0; i<n_dof_; i++) {
-      joint_position_sample_(i) = rml_out_->GetNewPositionVectorElement(i);
-      joint_velocity_sample_(i) = rml_out_->GetNewVelocityVectorElement(i);
-    }
+  if(!sampling_succeeded) {
+    this->error();
+    return;
   }
 
   // Send instantaneous joint position and velocity commands
@@ -447,7 +501,7 @@ void JointTrajGeneratorRML::updateHook()
   joint_velocity_out_.write(joint_velocity_sample_);
   
   // Publish debug traj to ros
-  if(ros_publish_throttle_.ready()) 
+  if(ros_publish_throttle_.ready(0.02)) 
   {
     joint_state_desired_.header.stamp = rtt_rosclock::host_rt_now();
     joint_state_desired_.position.resize(n_dof_);
