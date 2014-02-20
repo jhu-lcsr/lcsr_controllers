@@ -31,7 +31,7 @@ JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
   ,n_dof_(0)
   // Trajectory state
   ,segments_()
-  // Debugging
+  // Debuggin
   ,ros_publish_throttle_(0.02)
 {
   // Declare properties
@@ -108,16 +108,10 @@ bool JointTrajGeneratorRML::configureHook()
       RTT::log(RTT::Error) << "Could not initialize robot kinematics!" << RTT::endlog();
       return false;
     }
+  
   }
-
-  // Resize IO vectors (if necessary)
-  joint_position_.resize(n_dof_);
-  joint_velocity_.resize(n_dof_);
-
-  joint_position_cmd_.conservativeResize(n_dof_);
-  joint_position_sample_.conservativeResize(n_dof_);
-  joint_velocity_sample_.conservativeResize(n_dof_);
-
+  // Get individual joint properties from urdf and parameter server
+  joint_names_.resize(n_dof_);
 
   position_tolerance_.conservativeResize(n_dof_);
   max_velocities_.conservativeResize(n_dof_);
@@ -129,41 +123,52 @@ bool JointTrajGeneratorRML::configureHook()
   rosparam->getComponentPrivate("max_accelerations");
   rosparam->getComponentPrivate("max_jerks");
   rosparam->getComponentPrivate("sampling_resolution");
+  
+  // Resize IO vectors
+  joint_position_.resize(n_dof_);
+  joint_position_cmd_.resize(n_dof_);
+  joint_position_sample_.resize(n_dof_);
+  joint_velocity_.resize(n_dof_);
+  joint_velocity_sample_.resize(n_dof_);
 
+  // Configure RML structures
+  return this->configureRML(rml_, rml_in_, rml_out_, rml_flags_);
+}
+
+bool JointTrajGeneratorRML::configureRML(
+    boost::shared_ptr<ReflexxesAPI> &rml,
+    boost::shared_ptr<RMLPositionInputParameters> &rml_in,
+    boost::shared_ptr<RMLPositionOutputParameters> &rml_out,
+    RMLPositionFlags &rml_flags) const
+{
   // Create trajectory generator
-  rml_.reset(new ReflexxesAPI(n_dof_, sampling_resolution_));
-  rml_in_.reset(new RMLPositionInputParameters(n_dof_));
-  rml_out_.reset(new RMLPositionOutputParameters(n_dof_));
+  rml.reset(new ReflexxesAPI(n_dof_, sampling_resolution_));
+  rml_in.reset(new RMLPositionInputParameters(n_dof_));
+  rml_out.reset(new RMLPositionOutputParameters(n_dof_));
   
   // Hold fixed at final point once trajectory is complete
-  rml_flags_.BehaviorAfterFinalStateOfMotionIsReached = RMLPositionFlags::RECOMPUTE_TRAJECTORY;
-  rml_flags_.SynchronizationBehavior = RMLPositionFlags::ONLY_TIME_SYNCHRONIZATION;
-
-  // Get individual joint properties from urdf and parameter server
-  joint_names_.resize(n_dof_);
-
-  // Generate joint map here
+  rml_flags.BehaviorAfterFinalStateOfMotionIsReached = RMLPositionFlags::RECOMPUTE_TRAJECTORY;
+  rml_flags.SynchronizationBehavior = RMLPositionFlags::ONLY_TIME_SYNCHRONIZATION;
 
   for(size_t j = 0; j < n_dof_; j++)
   { 
     // Get RML parameters from RTT Properties
-    rml_in_->MaxVelocityVector->VecData[j] =  max_velocities_[j];
-    rml_in_->MaxAccelerationVector->VecData[j] = max_accelerations_[j];
-    rml_in_->MaxJerkVector->VecData[j] = max_jerks_[j];
+    rml_in->MaxVelocityVector->VecData[j] =  max_velocities_[j];
+    rml_in->MaxAccelerationVector->VecData[j] = max_accelerations_[j];
+    rml_in->MaxJerkVector->VecData[j] = max_jerks_[j];
 
     // Enable this joint
-    rml_in_->SelectionVector->VecData[j] = true;
+    rml_in->SelectionVector->VecData[j] = true;
   }
 
   // Check if the reflexxes config is valud
-  if(rml_in_->CheckForValidity()) {
+  if(rml_in->CheckForValidity()) {
     RTT::log(RTT::Info) << ("RML INPUT Configuration Valid.") << RTT::endlog();
-
-    this->rml_debug(RTT::Debug);
+    RMLLog(RTT::Debug, rml_in);
   } else {
     RTT::log(RTT::Error) << ("RML INPUT Configuration Invalid!") << RTT::endlog();
     RTT::log(RTT::Error) << ("NOTE: MaxVelocityVector, MaxAccelerationVector, and MaxJerkVector must all be non-zero for a solution to exist.") << RTT::endlog();
-    this->rml_debug(RTT::Error);
+    RMLLog(RTT::Error, rml_in);
     return false;
   }
 
@@ -273,10 +278,18 @@ bool JointTrajGeneratorRML::sampleTrajectory(
     boost::shared_ptr<ReflexxesAPI> rml,
     boost::shared_ptr<RMLPositionInputParameters> rml_in,
     boost::shared_ptr<RMLPositionOutputParameters> rml_out,
+    RMLPositionFlags &rml_flags,
     JointTrajGeneratorRML::TrajSegments &segments,
     Eigen::VectorXd &joint_position_sample,
     Eigen::VectorXd &joint_velocity_sample) const
 {
+  if( joint_position.size() != n_dof_ ||
+      joint_velocity.size() != n_dof_ ||
+      joint_position_sample.size() != n_dof_ ||
+      joint_velocity_sample.size() != n_dof_)
+  {
+    throw std::runtime_error("Bad vector passed to JointTrajGeneratorRML::sampleTrajectory.");
+  }
 
   bool recompute_trajectory = force_recompute_trajectory;
 
@@ -305,7 +318,7 @@ bool JointTrajGeneratorRML::sampleTrajectory(
   // Check if there's a new active segment
   if(recompute_trajectory) {
     // Remove the segments whose end times are in the past
-    segments.erase(segments.begin(), erase_it);
+    segments.erase(segments.begin(), ++erase_it);
   }
 
   // Check if there are any more segments to process and if we should start processing them
@@ -313,6 +326,11 @@ bool JointTrajGeneratorRML::sampleTrajectory(
   {
     // Get a reference to the active segment
     TrajSegment &active_segment = segments.front();
+    if(!active_segment.active) {
+      RTT::log(RTT::Debug) << "Front segment is not active. Activating..." << RTT::endlog();
+      recompute_trajectory = true;
+      active_segment.active = true;
+    }
 
     // Determine if any of the joint tolerances have been violated (this means we need to recompute the traj)
     if(!recompute_trajectory) {
@@ -320,6 +338,7 @@ bool JointTrajGeneratorRML::sampleTrajectory(
       {
         double tracking_error = std::abs(rml_out->GetNewPositionVectorElement(i) - joint_position[i]);
         if(tracking_error > position_tolerance_[i]) {
+          RTT::log(RTT::Debug) << ("Tracking error tolerance has been violated.") << RTT::endlog(); 
           recompute_trajectory = true;
         }
       }
@@ -359,7 +378,23 @@ bool JointTrajGeneratorRML::sampleTrajectory(
       rml_result = rml->RMLPosition(
           *rml_in.get(), 
           rml_out.get(), 
-          rml_flags_);
+          rml_flags);
+
+      // Get expected time
+      RTT::log(RTT::Debug) << "RML OUT: time: "<<rml_out->GetGreatestExecutionTime() << RTT::endlog();
+      active_segment.expected_time = active_segment.start_time + ros::Duration(rml_out->GetGreatestExecutionTime());
+
+      // If the goal time is zero, then it should be executed as fast as possible , subject to the constraints
+      if(active_segment.goal_time.isZero()) {
+        active_segment.goal_time = active_segment.expected_time;
+      } else if(active_segment.expected_time > active_segment.goal_time) {
+        RTT::log(RTT::Error) << "Dropping active segment because it cannot be reached in the desired time. " 
+          << "Desired: " << active_segment.goal_time - active_segment.start_time 
+          << " Required: " << active_segment.expected_time - active_segment.start_time
+          << RTT::endlog();
+        segments.pop_front();
+        return false;
+      }
     } 
     else 
     {
@@ -370,29 +405,53 @@ bool JointTrajGeneratorRML::sampleTrajectory(
     }
 
     // Only set a non-zero effort command if the 
-    switch(rml_result) 
-    {
-      case ReflexxesAPI::RML_WORKING:
-        // S'all good.
-        break;
-      case ReflexxesAPI::RML_FINAL_STATE_REACHED:
-        // Remove the active segment from the trajectory
-        segments.pop_front();
-        break;
-      default:
+    try {
+      switch(rml_result) 
+      {
+        case ReflexxesAPI::RML_WORKING:
+          // S'all good.
+          break;
+        case ReflexxesAPI::RML_FINAL_STATE_REACHED:
+          // Remove the active segment from the trajectory
+          segments.pop_front();
+          break;
+        case ReflexxesAPI::RML_ERROR_INVALID_INPUT_VALUES:
+          throw std::runtime_error("Reflexxes error RML_ERROR_INVALID_INPUT_VALUES in JointTrajGeneratorRML::sampleTrajectory");
+        case ReflexxesAPI::RML_ERROR_EXECUTION_TIME_CALCULATION:
+          throw std::runtime_error("Reflexxes error RML_ERROR_EXECUTION_TIME_CALCULATION in JointTrajGeneratorRML::sampleTrajectory");
+        case ReflexxesAPI::RML_ERROR_SYNCHRONIZATION:
+          throw std::runtime_error("Reflexxes error RML_ERROR_SYNCHRONIZATION in JointTrajGeneratorRML::sampleTrajectory");
+        case ReflexxesAPI::RML_ERROR_NUMBER_OF_DOFS:
+          throw std::runtime_error("Reflexxes error RML_ERROR_NUMBER_OF_DOFS in JointTrajGeneratorRML::sampleTrajectory");
+        case ReflexxesAPI::RML_ERROR_NO_PHASE_SYNCHRONIZATION:
+          throw std::runtime_error("Reflexxes error RML_ERROR_NO_PHASE_SYNCHRONIZATION in JointTrajGeneratorRML::sampleTrajectory");
+        case ReflexxesAPI::RML_ERROR_NULL_POINTER:
+          throw std::runtime_error("Reflexxes error RML_ERROR_NULL_POINTER in JointTrajGeneratorRML::sampleTrajectory");
+        case ReflexxesAPI::RML_ERROR_EXECUTION_TIME_TOO_BIG:
+          throw std::runtime_error("Reflexxes error RML_ERROR_EXECUTION_TIME_TOO_BIG in JointTrajGeneratorRML::sampleTrajectory");
+        case ReflexxesAPI::RML_ERROR_USER_TIME_OUT_OF_RANGE:
+          throw std::runtime_error("Reflexxes error RML_ERROR_USER_TIME_OUT_OF_RANGE in JointTrajGeneratorRML::sampleTrajectory");
+        case ReflexxesAPI::RML_ERROR:
+          throw std::runtime_error("Reflexxes error RML_ERROR in JointTrajGeneratorRML::sampleTrajectory");
+        default:
+          throw std::runtime_error("Reflexxes error in JointTrajGeneratorRML::sampleTrajectory");
+      };
+    } catch(...) {
         RTT::log(RTT::Error) << "Reflexxes error code: "<<rml_result<<". Entering error state and not writing a desired position." << RTT::endlog();
-        return false;
-        break;
-    };
+        RMLLog(RTT::Error, rml_in);
+        throw;
+    }
 
     // Get the new sampled reference
     for(size_t i=0; i<n_dof_; i++) {
       joint_position_sample(i) = rml_out->GetNewPositionVectorElement(i);
       joint_velocity_sample(i) = rml_out->GetNewVelocityVectorElement(i);
     }
+
+    return true;
   }
 
-  return true;
+  return false;
 }
 
 void JointTrajGeneratorRML::updateHook()
@@ -492,32 +551,34 @@ void JointTrajGeneratorRML::updateHook()
   }
 
   // Sample the trajectory from segments_
-  bool sampling_succeeded = 
-    this->sampleTrajectory(
-        rtt_now, recompute_trajectory,
-        joint_position_, joint_velocity_,
-        rml_, rml_in_, rml_out_,
-        segments_,
-        joint_position_sample_, joint_velocity_sample_);
+  try { 
+    bool new_sample = 
+      this->sampleTrajectory(
+          rtt_now, recompute_trajectory,
+          joint_position_, joint_velocity_,
+          rml_, rml_in_, rml_out_, rml_flags_,
+          segments_,
+          joint_position_sample_, joint_velocity_sample_);
 
-  if(!sampling_succeeded) {
+    if(new_sample) {
+      // Send instantaneous joint position and velocity commands
+      joint_position_out_.write(joint_position_sample_);
+      joint_velocity_out_.write(joint_velocity_sample_);
+      
+      // Publish debug traj to ros
+      if(ros_publish_throttle_.ready(0.02)) 
+      {
+        joint_state_desired_.header.stamp = rtt_rosclock::host_rt_now();
+        joint_state_desired_.position.resize(n_dof_);
+        joint_state_desired_.velocity.resize(n_dof_);
+        std::copy(joint_position_sample_.data(), joint_position_sample_.data() + n_dof_, joint_state_desired_.position.begin());
+        std::copy(joint_velocity_sample_.data(), joint_velocity_sample_.data() + n_dof_, joint_state_desired_.velocity.begin());
+        joint_state_desired_out_.write(joint_state_desired_);
+      }
+    }
+  } catch (std::runtime_error &err) {
     this->error();
     return;
-  }
-
-  // Send instantaneous joint position and velocity commands
-  joint_position_out_.write(joint_position_sample_);
-  joint_velocity_out_.write(joint_velocity_sample_);
-  
-  // Publish debug traj to ros
-  if(ros_publish_throttle_.ready(0.02)) 
-  {
-    joint_state_desired_.header.stamp = rtt_rosclock::host_rt_now();
-    joint_state_desired_.position.resize(n_dof_);
-    joint_state_desired_.velocity.resize(n_dof_);
-    std::copy(joint_position_sample_.data(), joint_position_sample_.data() + n_dof_, joint_state_desired_.position.begin());
-    std::copy(joint_velocity_sample_.data(), joint_velocity_sample_.data() + n_dof_, joint_state_desired_.velocity.begin());
-    joint_state_desired_out_.write(joint_state_desired_);
   }
 }
 
@@ -541,24 +602,27 @@ std::ostream& operator<< (std::ostream& stream, const RMLVector<T>& rml_vec) {
 }
 
 
-void JointTrajGeneratorRML::rml_debug(const RTT::LoggerLevel level) {
+void JointTrajGeneratorRML::RMLLog(
+    const RTT::LoggerLevel level,
+    const boost::shared_ptr<RMLPositionInputParameters> rml_in) 
+{
   RTT::log(level) << "RML INPUT: "<< RTT::endlog();
-  RTT::log(level) << " - NumberOfDOFs:               "<<rml_in_->NumberOfDOFs << RTT::endlog();
-  RTT::log(level) << " - MinimumSynchronizationTime: "<<rml_in_->MinimumSynchronizationTime << RTT::endlog();
+  RTT::log(level) << " - NumberOfDOFs:               "<<rml_in->NumberOfDOFs << RTT::endlog();
+  RTT::log(level) << " - MinimumSynchronizationTime: "<<rml_in->MinimumSynchronizationTime << RTT::endlog();
 
-  RTT::log(level) << " - SelectionVector: "<<*(rml_in_->SelectionVector) << RTT::endlog();
+  RTT::log(level) << " - SelectionVector: "<<*(rml_in->SelectionVector) << RTT::endlog();
 
-  RTT::log(level) << " - CurrentPositionVector:     "<<*(rml_in_->CurrentPositionVector) << RTT::endlog();
-  RTT::log(level) << " - CurrentVelocityVector:     "<<*(rml_in_->CurrentVelocityVector) << RTT::endlog();
-  RTT::log(level) << " - CurrentAccelerationVector: "<<*(rml_in_->CurrentAccelerationVector) << RTT::endlog();
+  RTT::log(level) << " - CurrentPositionVector:     "<<*(rml_in->CurrentPositionVector) << RTT::endlog();
+  RTT::log(level) << " - CurrentVelocityVector:     "<<*(rml_in->CurrentVelocityVector) << RTT::endlog();
+  RTT::log(level) << " - CurrentAccelerationVector: "<<*(rml_in->CurrentAccelerationVector) << RTT::endlog();
 
-  RTT::log(level) << " - MaxVelocityVector:     "<<*(rml_in_->MaxVelocityVector) << RTT::endlog();
-  RTT::log(level) << " - MaxAccelerationVector: "<<*(rml_in_->MaxAccelerationVector) << RTT::endlog();
-  RTT::log(level) << " - MaxJerkVector:         "<<*(rml_in_->MaxJerkVector) << RTT::endlog();
+  RTT::log(level) << " - MaxVelocityVector:     "<<*(rml_in->MaxVelocityVector) << RTT::endlog();
+  RTT::log(level) << " - MaxAccelerationVector: "<<*(rml_in->MaxAccelerationVector) << RTT::endlog();
+  RTT::log(level) << " - MaxJerkVector:         "<<*(rml_in->MaxJerkVector) << RTT::endlog();
 
-  RTT::log(level) << " - TargetPositionVector:            "<<*(rml_in_->TargetPositionVector) << RTT::endlog();
-  RTT::log(level) << " - TargetVelocityVector:            "<<*(rml_in_->TargetVelocityVector) << RTT::endlog();
+  RTT::log(level) << " - TargetPositionVector:            "<<*(rml_in->TargetPositionVector) << RTT::endlog();
+  RTT::log(level) << " - TargetVelocityVector:            "<<*(rml_in->TargetVelocityVector) << RTT::endlog();
 
-  RTT::log(level) << " - AlternativeTargetVelocityVector: "<<*(rml_in_->AlternativeTargetVelocityVector) << RTT::endlog();
+  RTT::log(level) << " - AlternativeTargetVelocityVector: "<<*(rml_in->AlternativeTargetVelocityVector) << RTT::endlog();
 }
 

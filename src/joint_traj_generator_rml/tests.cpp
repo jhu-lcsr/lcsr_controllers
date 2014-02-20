@@ -171,13 +171,18 @@ public:
     max_accelerations,
     max_jerks;
 
+  boost::shared_ptr<ReflexxesAPI> rml;
+  boost::shared_ptr<RMLPositionInputParameters> rml_in;
+  boost::shared_ptr<RMLPositionOutputParameters> rml_out;
+  RMLPositionFlags rml_flags;
+
   InstanceTest() :
     StaticTest(),
     task(new JointTrajGeneratorRML("test_traj_rml")),
     sampling_resolution(0.001),
-    max_velocities(Eigen::VectorXd::Constant(n_dof,1.0)),
-    max_accelerations(Eigen::VectorXd::Constant(n_dof,10.0)),
-    max_jerks(Eigen::VectorXd::Constant(n_dof,100.0))
+    max_velocities(Eigen::VectorXd::Constant(n_dof,2.5)),
+    max_accelerations(Eigen::VectorXd::Constant(n_dof,5.0)),
+    max_jerks(Eigen::VectorXd::Constant(n_dof,1.0))
   {
     task->n_dof_ = n_dof;
     task->sampling_resolution_ = sampling_resolution;
@@ -191,11 +196,289 @@ public:
 TEST_F(InstanceTest, Configure)
 {
   ASSERT_TRUE(task->configure());
+  ASSERT_TRUE(task->configureRML(rml, rml_in, rml_out, rml_flags));
 }
 
 TEST_F(InstanceTest, EmptyTraj)
 {
+  RecordProperty("description", 
+                 "This tests the trajectory generator with an empty trajectory. "
+                 "It should do nothing.");
+
   ASSERT_TRUE(task->configure());
+  ASSERT_TRUE(task->configureRML(rml, rml_in, rml_out, rml_flags));
+
+  JointTrajGeneratorRML::TrajSegments segments;
+
+  Eigen::VectorXd
+    joint_position(n_dof),
+    joint_velocity(n_dof),
+    joint_position_sample(n_dof),
+    joint_velocity_sample(n_dof),
+    joint_position_sample_expected(n_dof),
+    joint_velocity_sample_expected(n_dof);
+
+  joint_position << 0,0,0,0,0,0,0;
+  joint_velocity << 0,0,0,0,0,0,0;
+  joint_position_sample << 1,2,3,4,5,6,7;
+  joint_velocity_sample << 1,2,3,4,5,6,7;
+
+  joint_position_sample_expected = joint_position_sample;
+  joint_velocity_sample_expected = joint_velocity_sample;
+
+  // This should return false and shouldn't modify the samples
+  EXPECT_FALSE(
+      task->sampleTrajectory(
+          now, false,
+          joint_position, joint_velocity,
+          rml, rml_in, rml_out, rml_flags,
+          segments,
+          joint_position_sample, joint_velocity_sample));
+
+  EXPECT_EQ(segments.size(),0);
+  EXPECT_TRUE(joint_position_sample == joint_position_sample_expected);
+  EXPECT_TRUE(joint_velocity_sample == joint_velocity_sample_expected);
+}
+
+TEST_F(InstanceTest, OldTraj)
+{
+  RecordProperty("description", 
+                 "This tests the trajectory generator with a trajectory which "
+                 "should have already been completed. It should clear the "
+                 "trajectory and generate no new samples.");
+
+  JointTrajGeneratorRML::TrajSegments segments;
+  JointTrajGeneratorRML::TrajectoryMsgToSegments(
+      traj_msg,
+      n_dof,
+      now - ros::Duration(20.0),
+      segments);
+
+  ASSERT_TRUE(task->configure());
+  ASSERT_TRUE(task->configureRML(rml, rml_in, rml_out, rml_flags));
+
+  Eigen::VectorXd
+    joint_position(n_dof),
+    joint_velocity(n_dof),
+    joint_position_sample(n_dof),
+    joint_velocity_sample(n_dof),
+    joint_position_sample_expected(n_dof),
+    joint_velocity_sample_expected(n_dof);
+
+  joint_position << 0,0,0,0,0,0,0;
+  joint_velocity << 0,0,0,0,0,0,0;
+  joint_position_sample << 1,2,3,4,5,6,7;
+  joint_velocity_sample << 1,2,3,4,5,6,7;
+
+  joint_position_sample_expected = joint_position_sample;
+  joint_velocity_sample_expected = joint_velocity_sample;
+
+  // This should return false and shouldn't modify the samples
+  EXPECT_FALSE(
+      task->sampleTrajectory(
+          now, false,
+          joint_position, joint_velocity,
+          rml, rml_in, rml_out, rml_flags,
+          segments,
+          joint_position_sample, joint_velocity_sample));
+
+  EXPECT_EQ(segments.size(),0);
+  EXPECT_TRUE(joint_position_sample == joint_position_sample_expected);
+  EXPECT_TRUE(joint_velocity_sample == joint_velocity_sample_expected);
+}
+
+TEST_F(InstanceTest, LateTraj)
+{
+  RecordProperty("description", 
+                 "This tests the trajectory generator with a trajectory which "
+                 "started before now, but still has points that were not yet "
+                 "meant to be started. It should generate a sample and it "
+                 "should indicate the head trajectory segment is active." );
+  JointTrajGeneratorRML::TrajSegments segments;
+  JointTrajGeneratorRML::TrajectoryMsgToSegments(
+      traj_msg,
+      n_dof,
+      now - ros::Duration(5.0),
+      segments);
+
+  ASSERT_TRUE(task->configure());
+  ASSERT_TRUE(task->configureRML(rml, rml_in, rml_out, rml_flags));
+
+  Eigen::VectorXd
+    joint_position(n_dof),
+    joint_velocity(n_dof),
+    joint_position_sample(n_dof),
+    joint_velocity_sample(n_dof),
+    joint_position_sample_expected(n_dof),
+    joint_velocity_sample_expected(n_dof);
+
+  joint_position << 0,0,0,0,0,0,0;
+  joint_velocity << 0,0,0,0,0,0,0;
+  joint_position_sample << 1,2,3,4,5,6,7;
+  joint_velocity_sample << 1,2,3,4,5,6,7;
+
+  joint_position_sample_expected = joint_position_sample;
+  joint_velocity_sample_expected = joint_velocity_sample;
+
+  // This should return false and shouldn't modify the samples
+  EXPECT_TRUE(
+      task->sampleTrajectory(
+          now, false,
+          joint_position, joint_velocity,
+          rml, rml_in, rml_out, rml_flags,
+          segments,
+          joint_position_sample, joint_velocity_sample));
+
+  ASSERT_EQ(segments.size(),5);
+  EXPECT_TRUE(segments.front().active);
+  EXPECT_TRUE(joint_position_sample != joint_position_sample_expected);
+  EXPECT_TRUE(joint_velocity_sample != joint_velocity_sample_expected);
+}
+
+TEST_F(InstanceTest, NowTraj)
+{
+  RecordProperty("description", 
+                 "This tests the trajectory generator with a trajectory which "
+                 "starts immediately. It should generate a sample and it should "
+                 "indicate the head trajectory segment is active." );
+
+  JointTrajGeneratorRML::TrajSegments segments;
+  JointTrajGeneratorRML::TrajectoryMsgToSegments(
+      traj_msg,
+      n_dof,
+      now,
+      segments);
+
+  ASSERT_TRUE(task->configure());
+  ASSERT_TRUE(task->configureRML(rml, rml_in, rml_out, rml_flags));
+
+  Eigen::VectorXd
+    joint_position(n_dof),
+    joint_velocity(n_dof),
+    joint_position_sample(n_dof),
+    joint_velocity_sample(n_dof),
+    joint_position_sample_original(n_dof),
+    joint_velocity_sample_original(n_dof);
+
+  joint_position << 0,0,0,0,0,0,0;
+  joint_velocity << 0,0,0,0,0,0,0;
+  joint_position_sample << 1,2,3,4,5,6,7;
+  joint_velocity_sample << 1,2,3,4,5,6,7;
+
+  joint_position_sample_original = joint_position_sample;
+  joint_velocity_sample_original = joint_velocity_sample;
+
+  // This should return false and shouldn't modify the samples
+  EXPECT_TRUE(
+      task->sampleTrajectory(
+          now, false,
+          joint_position, joint_velocity,
+          rml, rml_in, rml_out, rml_flags,
+          segments,
+          joint_position_sample, joint_velocity_sample));
+
+  ASSERT_EQ(segments.size(),n_base_traj_points);
+  EXPECT_TRUE(segments.front().active);
+  EXPECT_TRUE(joint_position_sample != joint_position_sample_original);
+  EXPECT_TRUE(joint_velocity_sample != joint_velocity_sample_original);
+}
+
+TEST_F(InstanceTest, SoonTraj)
+{
+  RecordProperty("description", 
+                 "This tests the trajectory generator with a trajectory which "
+                 "starts in the future. It should not generate any samples, and "
+                 "it shouldn't modify the trajectory at all." );
+
+  JointTrajGeneratorRML::TrajSegments segments;
+  JointTrajGeneratorRML::TrajectoryMsgToSegments(
+      traj_msg,
+      n_dof,
+      now + ros::Duration(10.0),
+      segments);
+
+  ASSERT_TRUE(task->configure());
+  ASSERT_TRUE(task->configureRML(rml, rml_in, rml_out, rml_flags));
+
+  Eigen::VectorXd
+    joint_position(n_dof),
+    joint_velocity(n_dof),
+    joint_position_sample(n_dof),
+    joint_velocity_sample(n_dof),
+    joint_position_sample_original(n_dof),
+    joint_velocity_sample_original(n_dof);
+
+  joint_position << 0,0,0,0,0,0,0;
+  joint_velocity << 0,0,0,0,0,0,0;
+  joint_position_sample << 1,2,3,4,5,6,7;
+  joint_velocity_sample << 1,2,3,4,5,6,7;
+
+  joint_position_sample_original = joint_position_sample;
+  joint_velocity_sample_original = joint_velocity_sample;
+
+  // This should return false and shouldn't modify the samples
+  EXPECT_FALSE(
+      task->sampleTrajectory(
+          now, false,
+          joint_position, joint_velocity,
+          rml, rml_in, rml_out, rml_flags,
+          segments,
+          joint_position_sample, joint_velocity_sample));
+
+  EXPECT_EQ(segments.size(),n_base_traj_points);
+  EXPECT_FALSE(segments.front().active);
+  EXPECT_TRUE(joint_position_sample == joint_position_sample_original);
+  EXPECT_TRUE(joint_velocity_sample == joint_velocity_sample_original);
+}
+
+TEST_F(InstanceTest, FullTraj)
+{
+  RecordProperty("description", 
+                 "This tests the trajectory generator with a trajectory which "
+                 "starts in the future. It should not generate any samples, and "
+                 "it shouldn't modify the trajectory at all." );
+
+  JointTrajGeneratorRML::TrajSegments segments;
+  JointTrajGeneratorRML::TrajectoryMsgToSegments(
+      traj_msg,
+      n_dof,
+      now,
+      segments);
+
+  ASSERT_TRUE(task->configure());
+  ASSERT_TRUE(task->configureRML(rml, rml_in, rml_out, rml_flags));
+
+  Eigen::VectorXd
+    joint_position(n_dof),
+    joint_velocity(n_dof),
+    joint_position_sample(n_dof),
+    joint_velocity_sample(n_dof),
+    joint_position_sample_original(n_dof),
+    joint_velocity_sample_original(n_dof);
+
+  joint_position << 0,0,0,0,0,0,0;
+  joint_velocity << 0,0,0,0,0,0,0;
+  joint_position_sample << 1,2,3,4,5,6,7;
+  joint_velocity_sample << 1,2,3,4,5,6,7;
+
+  joint_position_sample_original = joint_position_sample;
+  joint_velocity_sample_original = joint_velocity_sample;
+
+  bool sampled_traj = true;
+  ros::Time looptime = now;
+  while(sampled_traj) {
+    sampled_traj = task->sampleTrajectory(
+        looptime, false,
+        joint_position, joint_velocity,
+        rml, rml_in, rml_out, rml_flags,
+        segments,
+        joint_position_sample, joint_velocity_sample);
+    looptime = looptime + ros::Duration(0.002);
+    joint_position = joint_position_sample;
+    joint_velocity = joint_velocity_sample;
+  }
+
+  EXPECT_EQ(segments.size(),0);
 }
 
 int main(int argc, char** argv) {
@@ -206,7 +489,7 @@ int main(int argc, char** argv) {
 
   RTT::Logger::log().setStdStream(std::cerr);
   RTT::Logger::log().mayLogStdOut(true);
-  //RTT::Logger::log().setLogLevel(RTT::Logger::Debug);
+  RTT::Logger::log().setLogLevel(RTT::Logger::Debug);
 
   // Import conman plugin
   if(!RTT::ComponentLoader::Instance()->import("conman", "" )) {

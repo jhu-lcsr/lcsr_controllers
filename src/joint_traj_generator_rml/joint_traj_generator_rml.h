@@ -74,8 +74,10 @@ namespace lcsr_controllers {
     struct TrajSegment 
     {
       TrajSegment(size_t n_dof, ros::Time start_time_ = ros::Time(0,0), ros::Time goal_time_ = ros::Time(0,0)) :
+        active(false),
         start_time(start_time_),
         goal_time(goal_time_), 
+        expected_time(goal_time_), 
         goal_positions(n_dof),
         goal_velocities(n_dof),
         goal_accelerations(n_dof)
@@ -85,8 +87,10 @@ namespace lcsr_controllers {
         goal_accelerations.setZero();
       }
 
+      bool active;
       ros::Time start_time;
       ros::Time goal_time;
+      ros::Time expected_time;
       Eigen::VectorXd goal_positions;
       Eigen::VectorXd goal_velocities;
       Eigen::VectorXd goal_accelerations;
@@ -108,16 +112,29 @@ namespace lcsr_controllers {
     //! Segments to follow
     TrajSegments segments_;
 
+    //! Convert a ROS trajectory message to a list of TrajSegments
     static bool TrajectoryMsgToSegments(
         const trajectory_msgs::JointTrajectory &msg,
         const size_t n_dof,
         const ros::Time trajectory_start_time,
         TrajSegments &segments);
 
+    //! Update the one trajectory with points from another
     static bool UpdateTrajectory(
         TrajSegments &current_segments,
         const TrajSegments &new_segments);
+
+    //! Configure some RML structures from this tasks's properties
+    bool configureRML(
+        boost::shared_ptr<ReflexxesAPI> &rml,
+        boost::shared_ptr<RMLPositionInputParameters> &rml_in,
+        boost::shared_ptr<RMLPositionOutputParameters> &rml_out,
+        RMLPositionFlags &rml_flags) const;
     
+    /** \brief Sample the trajectory based on the current set of segments and robot state
+     * This function does not change the state of the component, so it can be
+     * used easily in testing or with lookaheads.
+     */
     bool sampleTrajectory(
         const ros::Time rtt_now,
         const bool force_recompute_trajectory,
@@ -126,9 +143,15 @@ namespace lcsr_controllers {
         boost::shared_ptr<ReflexxesAPI> rml,
         boost::shared_ptr<RMLPositionInputParameters> rml_in,
         boost::shared_ptr<RMLPositionOutputParameters> rml_out,
+        RMLPositionFlags &rml_flags,
         JointTrajGeneratorRML::TrajSegments &segments,
         Eigen::VectorXd &joint_position_sample,
         Eigen::VectorXd &joint_velocity_sample) const;
+
+    //! Output information about some RML input parameters
+    static void RMLLog(
+        const RTT::LoggerLevel level,
+        const boost::shared_ptr<RMLPositionInputParameters> rml_in);
 
   protected:
 
@@ -157,9 +180,6 @@ namespace lcsr_controllers {
 
     // Conman interface
     boost::shared_ptr<conman::Hook> conman_hook_;
-
-    //! Output information about the current RML
-    void rml_debug(const RTT::LoggerLevel level);
 
   };
 }

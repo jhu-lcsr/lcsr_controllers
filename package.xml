@@ -47,7 +47,7 @@
       <plugin_depend>rtt_trajectory_msgs</plugin_depend>
       <plugin_depend>rtt_visualization_msgs</plugin_depend>
       <plugin_depend>rtt_rosparam</plugin_depend>
-      <plugin_depend>rtt_rostopic</plugin_depend>
+      <plugin_depend>rtt_roscomm</plugin_depend>
     </rtt_ros>
   </export>
 </package>
