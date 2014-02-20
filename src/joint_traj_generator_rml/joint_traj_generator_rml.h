@@ -30,17 +30,20 @@
 namespace lcsr_controllers {
   class JointTrajGeneratorRML : public RTT::TaskContext
   {
+  public:
     // RTT Properties
     std::string robot_description_;
     std::string root_link_;
     std::string tip_link_;
-    float velocity_smoothing_factor_;
+    unsigned int n_dof_;
+    double sampling_resolution_;
     Eigen::VectorXd 
       position_tolerance_,
       max_velocities_,
       max_accelerations_,
       max_jerks_;
 
+  protected:
     // RTT Ports
     RTT::InputPort<Eigen::VectorXd> joint_position_in_;
     RTT::InputPort<Eigen::VectorXd> joint_velocity_in_;
@@ -60,54 +63,7 @@ namespace lcsr_controllers {
     virtual void updateHook();
     virtual void stopHook();
     virtual void cleanupHook();
-
-  private:
-
-    // Robot model
-    unsigned int n_dof_;
-    KDL::Tree kdl_tree_;
-    KDL::Chain kdl_chain_;
-
-    // State
-    Eigen::VectorXd
-      joint_position_,
-      joint_position_cmd_,
-      joint_position_sample_,
-      joint_velocity_,
-      joint_velocity_sample_;
-
-    trajectory_msgs::JointTrajectoryPoint joint_traj_point_cmd_;
-    trajectory_msgs::JointTrajectory joint_traj_cmd_;
-    sensor_msgs::JointState joint_state_desired_;
-    rtt_ros_tools::PeriodicThrottle ros_publish_throttle_;
-
-    // Conman interface
-    boost::shared_ptr<conman::Hook> conman_hook_;
-
-    //////////////////////////////////////////////////////////////////////////////////////
-    //////////////////////////////////////////////////////////////////////////////////////
-    //////////////////////////////////////////////////////////////////////////////////////
-    //
-
-  protected:
-    size_t n_joints_;
-    std::vector<std::string> joint_names_;
-    std::map<std::string,size_t> joint_name_index_map_;
-
-    //! Output information about the current RML
-    void rml_debug(const RTT::LoggerLevel level);
-
-    //! Trajectory Generator
-    boost::shared_ptr<ReflexxesAPI> rml_;
-    boost::shared_ptr<RMLPositionInputParameters> rml_in_;
-    boost::shared_ptr<RMLPositionOutputParameters> rml_out_;
-    RMLPositionFlags rml_flags_;
-
-    //! Trajectory parameters
-    double sampling_resolution_;
-    bool recompute_trajectory_;
-
-  public:
+    
     //! A trajectory segment structure for internal use 
     // This structure is used so that trajectory points can be decoupled from
     // each-other. The standard ROS trajectory message includes a timestamp
@@ -166,11 +122,40 @@ namespace lcsr_controllers {
         const ros::Time rtt_now,
         const bool force_recompute_trajectory,
         JointTrajGeneratorRML::TrajSegments &segments,
-        boost::shared_ptr<ReflexxesAPI> rml,
-        boost::shared_ptr<RMLPositionInputParameters> rml_in,
-        boost::shared_ptr<RMLPositionOutputParameters> rml_out,
         Eigen::VectorXd &joint_position_sample,
         Eigen::VectorXd &joint_velocity_sample);
+
+  protected:
+
+    //! Trajectory Generator
+    boost::shared_ptr<ReflexxesAPI> rml_;
+    boost::shared_ptr<RMLPositionInputParameters> rml_in_;
+    boost::shared_ptr<RMLPositionOutputParameters> rml_out_;
+    RMLPositionFlags rml_flags_;
+
+    // Robot model
+    std::vector<std::string> joint_names_;
+    std::map<std::string,size_t> joint_name_index_map_;
+
+    // State
+    Eigen::VectorXd
+      joint_position_,
+      joint_position_cmd_,
+      joint_position_sample_,
+      joint_velocity_,
+      joint_velocity_sample_;
+
+    trajectory_msgs::JointTrajectoryPoint joint_traj_point_cmd_;
+    trajectory_msgs::JointTrajectory joint_traj_cmd_;
+    sensor_msgs::JointState joint_state_desired_;
+    rtt_ros_tools::PeriodicThrottle ros_publish_throttle_;
+
+    // Conman interface
+    boost::shared_ptr<conman::Hook> conman_hook_;
+
+    //! Output information about the current RML
+    void rml_debug(const RTT::LoggerLevel level);
+
   };
 }
 

@@ -28,6 +28,8 @@ using namespace lcsr_controllers;
 
 #include <ros/ros.h>
 
+#include <rtt_ros/ros.h>
+
 class StaticTest : public ::testing::Test {
 public:
   size_t n_dof;
@@ -156,6 +158,46 @@ TEST_F(StaticTest, SpliceInterruptingTrajectory)
   EXPECT_EQ(segments_current.size(),1.5*n_base_traj_points); 
 }
 
+class InstanceTest : public StaticTest 
+{
+public:
+
+  boost::shared_ptr<JointTrajGeneratorRML> task;
+
+  double sampling_resolution;
+  Eigen::VectorXd 
+    position_tolerance,
+    max_velocities,
+    max_accelerations,
+    max_jerks;
+
+  InstanceTest() :
+    StaticTest(),
+    task(new JointTrajGeneratorRML("test_traj_rml")),
+    sampling_resolution(0.001),
+    max_velocities(Eigen::VectorXd::Constant(n_dof,1.0)),
+    max_accelerations(Eigen::VectorXd::Constant(n_dof,10.0)),
+    max_jerks(Eigen::VectorXd::Constant(n_dof,100.0))
+  {
+    task->n_dof_ = n_dof;
+    task->sampling_resolution_ = sampling_resolution;
+    task->position_tolerance_ = position_tolerance;
+    task->max_velocities_ = max_velocities;
+    task->max_accelerations_ = max_accelerations;
+    task->max_jerks_ = max_jerks;
+  }
+};
+
+TEST_F(InstanceTest, Configure)
+{
+  ASSERT_TRUE(task->configure());
+}
+
+TEST_F(InstanceTest, EmptyTraj)
+{
+  ASSERT_TRUE(task->configure());
+}
+
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
 
@@ -164,13 +206,20 @@ int main(int argc, char** argv) {
 
   RTT::Logger::log().setStdStream(std::cerr);
   RTT::Logger::log().mayLogStdOut(true);
-  //RTT::Logger::log().setLogLevel(RTT::Logger::Info);
+  //RTT::Logger::log().setLogLevel(RTT::Logger::Debug);
 
   // Import conman plugin
-  //if(!RTT::ComponentLoader::Instance()->import("lcsr_controllers", "" )) {
-    //std::cerr<<"Could not import lcsr_controllers package."<<std::endl;
-    //return -1;
-  //}
+  if(!RTT::ComponentLoader::Instance()->import("conman", "" )) {
+    std::cerr<<"Could not import conman package."<<std::endl;
+    return -1;
+  }
+  if(!RTT::ComponentLoader::Instance()->import("rtt_ros", "" )) {
+    std::cerr<<"Could not import rtt_ros package."<<std::endl;
+    return -1;
+  }
+  rtt_ros::ROS ros_requester;
+  ros_requester.import("rtt_rosparam");
+  ros_requester.import("lcsr_controllers");
   
   return RUN_ALL_TESTS();
 }

@@ -43,11 +43,11 @@
 
   <export>
     <rtt_ros>
-      <plugin_depend>kdl_typekit</plugin_depend>
-      <plugin_depend>eigen_typekit</plugin_depend>
       <plugin_depend>rtt_sensor_msgs</plugin_depend>
       <plugin_depend>rtt_trajectory_msgs</plugin_depend>
       <plugin_depend>rtt_visualization_msgs</plugin_depend>
+      <plugin_depend>rtt_rosparam</plugin_depend>
+      <plugin_depend>rtt_rostopic</plugin_depend>
     </rtt_ros>
   </export>
 </package>
