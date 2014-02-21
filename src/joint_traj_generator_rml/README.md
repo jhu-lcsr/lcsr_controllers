@@ -37,6 +37,8 @@ When receiving a `sensor_msgs/JointTrajectory` message, this controller aims to 
   * **header.stamp < NOW:** Preempt the current trajectory.
   * **header.stamp > NOW:** Continue the current trajectory.
 
+For each point, if the `time_from_start` is zero, then the controller will consider it's completion time "flexible." This means that it will execute it subject to the velocity, acceleration, and jerk limits given to the controller. This is useful if your high-level trajectories should be executed as quickly as possible subject to these limits.
+
 ### JointTrajectoryAction (ROS only)
 
 ***TBD***
