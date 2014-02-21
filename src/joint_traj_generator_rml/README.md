@@ -15,13 +15,13 @@ Commands can be sent to this generator in four ways:
 
 ### Eigen::VectorXd Streaming (Orocos only)
 
-* **Acquisition Time:** Immediately
-* **Preemption:** Preempts current trajectory
+* **Acquisition Time:** Immediately, subject to the dynamic limits.
+* **Preemption:** Preempts current trajectory.
 
 ### JointTrajectoryPoint Message (Orocos/ROS)
 
-* **Acquisition Time:** Immediately
-* **Preemption:** Preempts current trajectory
+* **Acquisition Time:** Immediately, subject to the dynamic limits.
+* **Preemption:** Preempts current trajectory.
 
 ### JointTrajectory Message (Orocos/ROS)
 
