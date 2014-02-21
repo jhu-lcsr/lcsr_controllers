@@ -106,12 +106,14 @@ TEST_F(StaticTest, SpliceLaterTrajectory)
       n_dof,
       now,
       segments_current);
+  EXPECT_EQ(segments_current.front().start_time, now);
 
   JointTrajGeneratorRML::TrajectoryMsgToSegments(
       traj_msg,
       n_dof,
       now + ros::Duration(10.0),
       segments_new);
+  EXPECT_EQ(segments_new.front().start_time, now + ros::Duration(10.0));
 
   JointTrajGeneratorRML::UpdateTrajectory(segments_current, segments_new);
 
@@ -126,12 +128,14 @@ TEST_F(StaticTest, SpliceEarlierTrajectory)
       n_dof,
       now,
       segments_current);
+  EXPECT_EQ(segments_current.front().start_time, now);
 
   JointTrajGeneratorRML::TrajectoryMsgToSegments(
       traj_msg,
       n_dof,
-      now + ros::Duration(-5.0),
+      now - ros::Duration(5.0),
       segments_new);
+  EXPECT_EQ(segments_new.front().start_time, now - ros::Duration(5.0));
 
   JointTrajGeneratorRML::UpdateTrajectory(segments_current, segments_new);
 
@@ -150,7 +154,7 @@ TEST_F(StaticTest, SpliceInterruptingTrajectory)
   JointTrajGeneratorRML::TrajectoryMsgToSegments(
       traj_msg,
       n_dof,
-      now + ros::Duration(+5.0),
+      now + ros::Duration(5.0),
       segments_new);
 
   JointTrajGeneratorRML::UpdateTrajectory(segments_current, segments_new);
@@ -547,7 +551,7 @@ int main(int argc, char** argv) {
 
   RTT::Logger::log().setStdStream(std::cerr);
   RTT::Logger::log().mayLogStdOut(true);
-  RTT::Logger::log().setLogLevel(RTT::Logger::Debug);
+  RTT::Logger::log().setLogLevel(RTT::Logger::Error);
 
   // Import conman plugin
   if(!RTT::ComponentLoader::Instance()->import("conman", "" )) {

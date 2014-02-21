@@ -242,34 +242,30 @@ bool JointTrajGeneratorRML::TrajectoryMsgToSegments(
       it != msg.points.end();
       ++it) 
   {
+    // Get a reference to the new segment
+    TrajSegment new_segment(n_dof);
+
     // Create and add the new segment 
     if(it->time_from_start.isZero()) {
-      segments.push_back(TrajSegment(n_dof));
-    } else {
-      // Compute the start time for the new segment. If this is the first
-      // point, then it's the trajectory start time. Otherwise, it's the end
-      // time of the preceeding point.
-
-      ros::Time new_segment_start_time;
-
-      if(it == msg.points.begin()) {
-        new_segment_start_time = new_traj_start_time;
-      } else {
-        new_segment_start_time = segments.back().goal_time;
-      }
-
-      segments.push_back(
-          TrajSegment(
-              n_dof, 
-              new_segment_start_time, 
-              new_traj_start_time + it->time_from_start));
+      new_segment.flexible = true;
     }
 
+    // Compute the start time for the new segment. If this is the first
+    // point, then it's the trajectory start time. Otherwise, it's the end
+    // time of the preceeding point.
+    if(it == msg.points.begin()) {
+      new_segment.start_time = new_traj_start_time;
+    } else {
+      new_segment.start_time = segments.back().goal_time;
+    }
+    new_segment.goal_time = new_traj_start_time + it->time_from_start;
+
     // Copy in the data
-    TrajSegment &new_segment = segments.back();
     if(it->positions.size() == n_dof) std::copy(it->positions.begin(), it->positions.end(), new_segment.goal_positions.data());
     if(it->velocities.size() == n_dof) std::copy(it->velocities.begin(), it->velocities.end(), new_segment.goal_velocities.data());
     if(it->accelerations.size() == n_dof) std::copy(it->accelerations.begin(), it->accelerations.end(), new_segment.goal_accelerations.data());
+
+    segments.push_back(new_segment);
   }
 
   return true;
@@ -499,7 +495,7 @@ void JointTrajGeneratorRML::updateHook()
     // Check the size of the jointspace command
     if(joint_position_cmd_.size() == n_dof_) {
       // Handle a position given as an Eigen vector
-      TrajSegment segment(n_dof_);
+      TrajSegment segment(n_dof_,true);
 
       segment.goal_positions = joint_position_;
       segments_.clear();
