@@ -242,23 +242,28 @@ bool JointTrajGeneratorRML::TrajectoryMsgToSegments(
       it != msg.points.end();
       ++it) 
   {
-    ros::Time new_segment_start_time;
-
-    // Compute the start time for the new segment. If this is the first
-    // point, then it's the trajectory start time. Otherwise, it's the end
-    // time of the preceeding point.
-    if(it == msg.points.begin()) {
-      new_segment_start_time = new_traj_start_time;
-    } else {
-      new_segment_start_time = segments.back().goal_time;
-    }
-
     // Create and add the new segment 
-    segments.push_back(
-        TrajSegment(
-            n_dof, 
-            new_segment_start_time, 
-            new_traj_start_time + it->time_from_start));
+    if(it->time_from_start.isZero()) {
+      segments.push_back(TrajSegment(n_dof));
+    } else {
+      // Compute the start time for the new segment. If this is the first
+      // point, then it's the trajectory start time. Otherwise, it's the end
+      // time of the preceeding point.
+
+      ros::Time new_segment_start_time;
+
+      if(it == msg.points.begin()) {
+        new_segment_start_time = new_traj_start_time;
+      } else {
+        new_segment_start_time = segments.back().goal_time;
+      }
+
+      segments.push_back(
+          TrajSegment(
+              n_dof, 
+              new_segment_start_time, 
+              new_traj_start_time + it->time_from_start));
+    }
 
     // Copy in the data
     TrajSegment &new_segment = segments.back();
@@ -309,7 +314,8 @@ bool JointTrajGeneratorRML::sampleTrajectory(
     TrajSegments::iterator next = it;  ++next;
 
     // Mark this segment for removal if it's expired or if we need to start processing the next one
-    if(it->goal_time <= rtt_now || (next != segments.end() && next->start_time <= rtt_now)) {
+    // This only applies to non-flexible segments
+    if(!it->flexible && (it->goal_time <= rtt_now || (next != segments.end() && next->start_time <= rtt_now))) {
       erase_it = it;
       recompute_trajectory = true;
     }
@@ -322,7 +328,7 @@ bool JointTrajGeneratorRML::sampleTrajectory(
   }
 
   // Check if there are any more segments to process and if we should start processing them
-  if(segments.size() > 0 && segments.front().start_time <= rtt_now) 
+  if(segments.size() > 0 && (segments.front().flexible || segments.front().start_time <= rtt_now)) 
   {
     // Get a reference to the active segment
     TrajSegment &active_segment = segments.front();
@@ -385,7 +391,7 @@ bool JointTrajGeneratorRML::sampleTrajectory(
       active_segment.expected_time = active_segment.start_time + ros::Duration(rml_out->GetGreatestExecutionTime());
 
       // If the goal time is zero, then it should be executed as fast as possible , subject to the constraints
-      if(active_segment.goal_time.isZero()) {
+      if(active_segment.flexible) {
         active_segment.goal_time = active_segment.expected_time;
       } else if(active_segment.expected_time > active_segment.goal_time) {
         RTT::log(RTT::Error) << "Dropping active segment because it cannot be reached in the desired time. " 

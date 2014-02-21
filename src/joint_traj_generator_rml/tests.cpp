@@ -481,6 +481,64 @@ TEST_F(InstanceTest, FullTraj)
   EXPECT_EQ(segments.size(),0);
 }
 
+TEST_F(InstanceTest, FlexibleTraj)
+{
+  RecordProperty("description", 
+                 "This tests the trajectory generator with a trajectory which "
+                 "starts in the future. It should not generate any samples, and "
+                 "it shouldn't modify the trajectory at all." );
+
+  JointTrajGeneratorRML::TrajSegments segments;
+  trajectory_msgs::JointTrajectory flexible_traj_msg = traj_msg;
+  for(std::vector<trajectory_msgs::JointTrajectoryPoint>::iterator it = flexible_traj_msg.points.begin();
+      it != flexible_traj_msg.points.end();
+      ++it)
+  {
+    it->time_from_start = ros::Duration(0,0);
+  }
+
+  JointTrajGeneratorRML::TrajectoryMsgToSegments(
+      flexible_traj_msg,
+      n_dof,
+      now,
+      segments);
+
+  ASSERT_TRUE(task->configure());
+  ASSERT_TRUE(task->configureRML(rml, rml_in, rml_out, rml_flags));
+
+  Eigen::VectorXd
+    joint_position(n_dof),
+    joint_velocity(n_dof),
+    joint_position_sample(n_dof),
+    joint_velocity_sample(n_dof),
+    joint_position_sample_original(n_dof),
+    joint_velocity_sample_original(n_dof);
+
+  joint_position << 0,0,0,0,0,0,0;
+  joint_velocity << 0,0,0,0,0,0,0;
+  joint_position_sample << 1,2,3,4,5,6,7;
+  joint_velocity_sample << 1,2,3,4,5,6,7;
+
+  joint_position_sample_original = joint_position_sample;
+  joint_velocity_sample_original = joint_velocity_sample;
+
+  bool sampled_traj = true;
+  ros::Time looptime = now;
+  while(sampled_traj) {
+    sampled_traj = task->sampleTrajectory(
+        looptime, false,
+        joint_position, joint_velocity,
+        rml, rml_in, rml_out, rml_flags,
+        segments,
+        joint_position_sample, joint_velocity_sample);
+    looptime = looptime + ros::Duration(0.002);
+    joint_position = joint_position_sample;
+    joint_velocity = joint_velocity_sample;
+  }
+
+  EXPECT_EQ(segments.size(),0);
+}
+
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
 

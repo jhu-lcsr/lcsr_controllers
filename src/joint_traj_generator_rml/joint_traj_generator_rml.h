@@ -73,21 +73,33 @@ namespace lcsr_controllers {
     // representation, where each point has a well-defined start and end time.
     struct TrajSegment 
     {
-      TrajSegment(size_t n_dof, ros::Time start_time_ = ros::Time(0,0), ros::Time goal_time_ = ros::Time(0,0)) :
+      TrajSegment(size_t n_dof) :
         active(false),
+        flexible(true),
+        start_time(ros::Time(0,0)),
+        goal_time(ros::Time(0,0)), 
+        expected_time(ros::Time(0,0)), 
+        goal_positions(Eigen::VectorXd::Constant(n_dof,0.0)),
+        goal_velocities(Eigen::VectorXd::Constant(n_dof,0.0)),
+        goal_accelerations(Eigen::VectorXd::Constant(n_dof,0.0))
+      { }
+
+      TrajSegment(
+          size_t n_dof, 
+          ros::Time start_time_,
+          ros::Time goal_time_) :
+        active(false),
+        flexible(false),
         start_time(start_time_),
         goal_time(goal_time_), 
         expected_time(goal_time_), 
-        goal_positions(n_dof),
-        goal_velocities(n_dof),
-        goal_accelerations(n_dof)
-      {
-        goal_positions.setZero();
-        goal_velocities.setZero();
-        goal_accelerations.setZero();
-      }
+        goal_positions(Eigen::VectorXd::Constant(n_dof,0.0)),
+        goal_velocities(Eigen::VectorXd::Constant(n_dof,0.0)),
+        goal_accelerations(Eigen::VectorXd::Constant(n_dof,0.0))
+      { }
 
       bool active;
+      bool flexible;
       ros::Time start_time;
       ros::Time goal_time;
       ros::Time expected_time;
