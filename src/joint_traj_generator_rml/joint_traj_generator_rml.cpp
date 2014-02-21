@@ -273,7 +273,6 @@ bool JointTrajGeneratorRML::TrajectoryMsgToSegments(
 
 bool JointTrajGeneratorRML::sampleTrajectory(
     const ros::Time rtt_now,
-    const bool force_recompute_trajectory,
     const Eigen::VectorXd &joint_position,
     const Eigen::VectorXd &joint_velocity,
     boost::shared_ptr<ReflexxesAPI> rml,
@@ -292,7 +291,7 @@ bool JointTrajGeneratorRML::sampleTrajectory(
     throw std::runtime_error("Bad vector passed to JointTrajGeneratorRML::sampleTrajectory.");
   }
 
-  bool recompute_trajectory = force_recompute_trajectory;
+  bool recompute_trajectory = false;
 
   /** After this point, only work in TrajSegment structures **/
 
@@ -481,7 +480,7 @@ void JointTrajGeneratorRML::updateHook()
   RTT::FlowStatus traj_status = joint_traj_cmd_in_.readNewest( joint_traj_cmd_ );
 
   // Do nothing and generate no output if there's no command
-  if(point_status == RTT::NoData && traj_status == RTT::NoData)
+  if(point_status == RTT::NoData && traj_status == RTT::NoData && traj_point_status == RTT::NoData)
   {
     return;
   }
@@ -492,11 +491,14 @@ void JointTrajGeneratorRML::updateHook()
   // Check if there's a new desired point
   if(point_status == RTT::NewData) 
   {
+    RTT::log(RTT::Debug) << "New point." <<RTT::endlog();
+
     // Check the size of the jointspace command
     if(joint_position_cmd_.size() == n_dof_) {
       // Handle a position given as an Eigen vector
       TrajSegment segment(n_dof_,true);
 
+      segment.start_time = rtt_now;
       segment.goal_positions = joint_position_;
       segments_.clear();
       segments_.push_back(segment);
@@ -510,6 +512,8 @@ void JointTrajGeneratorRML::updateHook()
   // Check if there's a new desired trajectory point
   else if(traj_point_status == RTT::NewData) 
   {
+    RTT::log(RTT::Debug) << "New trajectory point." <<RTT::endlog();
+
     // Create a unary trajectory
     trajectory_msgs::JointTrajectory unary_joint_traj;
     unary_joint_traj.points.push_back(joint_traj_point_cmd_);
@@ -519,7 +523,7 @@ void JointTrajGeneratorRML::updateHook()
     TrajectoryMsgToSegments(
         unary_joint_traj, 
         n_dof_, 
-        ros::Time(0,0), 
+        rtt_now, 
         segments_);
     
     // Set the recompute flag
@@ -528,6 +532,8 @@ void JointTrajGeneratorRML::updateHook()
   // Check if there's a new desired trajectory
   else if(traj_status == RTT::NewData) 
   {
+    RTT::log(RTT::Debug) << "New trajectory." <<RTT::endlog();
+
     // Create a new list of segments to be spliced in
     TrajSegments new_segments;
     // By default, set the start time to now
@@ -556,7 +562,7 @@ void JointTrajGeneratorRML::updateHook()
   try { 
     bool new_sample = 
       this->sampleTrajectory(
-          rtt_now, recompute_trajectory,
+          rtt_now,
           joint_position_, joint_velocity_,
           rml_, rml_in_, rml_out_, rml_flags_,
           segments_,

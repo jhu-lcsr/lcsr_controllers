@@ -233,7 +233,7 @@ TEST_F(InstanceTest, EmptyTraj)
   // This should return false and shouldn't modify the samples
   EXPECT_FALSE(
       task->sampleTrajectory(
-          now, false,
+          now,
           joint_position, joint_velocity,
           rml, rml_in, rml_out, rml_flags,
           segments,
@@ -280,7 +280,7 @@ TEST_F(InstanceTest, OldTraj)
   // This should return false and shouldn't modify the samples
   EXPECT_FALSE(
       task->sampleTrajectory(
-          now, false,
+          now,
           joint_position, joint_velocity,
           rml, rml_in, rml_out, rml_flags,
           segments,
@@ -327,7 +327,7 @@ TEST_F(InstanceTest, LateTraj)
   // This should return false and shouldn't modify the samples
   EXPECT_TRUE(
       task->sampleTrajectory(
-          now, false,
+          now,
           joint_position, joint_velocity,
           rml, rml_in, rml_out, rml_flags,
           segments,
@@ -375,7 +375,7 @@ TEST_F(InstanceTest, NowTraj)
   // This should return false and shouldn't modify the samples
   EXPECT_TRUE(
       task->sampleTrajectory(
-          now, false,
+          now,
           joint_position, joint_velocity,
           rml, rml_in, rml_out, rml_flags,
           segments,
@@ -423,7 +423,7 @@ TEST_F(InstanceTest, SoonTraj)
   // This should return false and shouldn't modify the samples
   EXPECT_FALSE(
       task->sampleTrajectory(
-          now, false,
+          now,
           joint_position, joint_velocity,
           rml, rml_in, rml_out, rml_flags,
           segments,
@@ -434,6 +434,63 @@ TEST_F(InstanceTest, SoonTraj)
   EXPECT_TRUE(joint_position_sample == joint_position_sample_original);
   EXPECT_TRUE(joint_velocity_sample == joint_velocity_sample_original);
 }
+
+TEST_F(InstanceTest, UnaryTraj)
+{
+  RecordProperty("description", 
+                 "This tests the trajectory generator with a trajectory which "
+                 "starts in the future. It should not generate any samples, and "
+                 "it shouldn't modify the trajectory at all." );
+
+  
+  // Create a unary trajectory
+  trajectory_msgs::JointTrajectory unary_joint_traj;
+  trajectory_msgs::JointTrajectoryPoint unary_joint_traj_point;
+  unary_joint_traj_point.positions.assign(n_dof,1.0);
+  unary_joint_traj.points.push_back(unary_joint_traj_point);
+
+  JointTrajGeneratorRML::TrajSegments segments;
+  JointTrajGeneratorRML::TrajectoryMsgToSegments(
+      unary_joint_traj,
+      n_dof,
+      now,
+      segments);
+
+  ASSERT_TRUE(task->configure());
+  ASSERT_TRUE(task->configureRML(rml, rml_in, rml_out, rml_flags));
+
+  Eigen::VectorXd
+    joint_position(n_dof),
+    joint_velocity(n_dof),
+    joint_position_sample(n_dof),
+    joint_velocity_sample(n_dof),
+    joint_position_sample_original(n_dof),
+    joint_velocity_sample_original(n_dof);
+
+  joint_position << 0,0,0,0,0,0,0;
+  joint_velocity << 0,0,0,0,0,0,0;
+  joint_position_sample << 1,2,3,4,5,6,7;
+  joint_velocity_sample << 1,2,3,4,5,6,7;
+
+  joint_position_sample_original = joint_position_sample;
+  joint_velocity_sample_original = joint_velocity_sample;
+
+  // This should return false and shouldn't modify the samples
+  ASSERT_EQ(segments.size(),1);
+  EXPECT_TRUE(
+      task->sampleTrajectory(
+          now,
+          joint_position, joint_velocity,
+          rml, rml_in, rml_out, rml_flags,
+          segments,
+          joint_position_sample, joint_velocity_sample));
+
+  ASSERT_EQ(segments.size(),1);
+  EXPECT_TRUE(segments.front().active);
+  EXPECT_TRUE(joint_position_sample != joint_position_sample_original);
+  EXPECT_TRUE(joint_velocity_sample != joint_velocity_sample_original);
+}
+
 
 TEST_F(InstanceTest, FullTraj)
 {
@@ -472,7 +529,7 @@ TEST_F(InstanceTest, FullTraj)
   ros::Time looptime = now;
   while(sampled_traj) {
     sampled_traj = task->sampleTrajectory(
-        looptime, false,
+        looptime,
         joint_position, joint_velocity,
         rml, rml_in, rml_out, rml_flags,
         segments,
@@ -530,7 +587,7 @@ TEST_F(InstanceTest, FlexibleTraj)
   ros::Time looptime = now;
   while(sampled_traj) {
     sampled_traj = task->sampleTrajectory(
-        looptime, false,
+        looptime,
         joint_position, joint_velocity,
         rml, rml_in, rml_out, rml_flags,
         segments,
@@ -551,7 +608,7 @@ int main(int argc, char** argv) {
 
   RTT::Logger::log().setStdStream(std::cerr);
   RTT::Logger::log().mayLogStdOut(true);
-  RTT::Logger::log().setLogLevel(RTT::Logger::Error);
+  //RTT::Logger::log().setLogLevel(RTT::Logger::Debug);
 
   // Import conman plugin
   if(!RTT::ComponentLoader::Instance()->import("conman", "" )) {

@@ -137,7 +137,6 @@ namespace lcsr_controllers {
      */
     bool sampleTrajectory(
         const ros::Time rtt_now,
-        const bool force_recompute_trajectory,
         const Eigen::VectorXd &joint_position,
         const Eigen::VectorXd &joint_velocity,
         boost::shared_ptr<ReflexxesAPI> rml,
