@@ -116,9 +116,10 @@ bool JointPIDController::startHook()
   joint_i_error_.setZero();
   joint_d_error_.setZero();
 
-  // Reset the last position flag
-  has_last_position_data_ = false;
-
+  joint_position_in_.clear();
+  joint_velocity_in_.clear();
+  joint_position_cmd_in_.clear();
+  joint_velocity_cmd_in_.clear();
   // TODO: Check sizes of all vectors
 
   return true;
@@ -133,70 +134,59 @@ void JointPIDController::updateHook()
     period = conman_hook_->getPeriod();
 
   // Read in the current joint positions & velocities
-  Eigen::VectorXd pos, vel;
-
   RTT::FlowStatus 
-    pos_status = joint_position_in_.readNewest( pos ), 
-    vel_status = joint_velocity_in_.readNewest( vel );
-
-  if(pos_status == RTT::NewData && pos.size() == n_dof_ ) { joint_position_ = pos; }
-  if(vel_status == RTT::NewData && vel.size() == n_dof_ ) { joint_velocity_raw_ = vel; }
+    pos_status = joint_position_in_.readNewest( joint_position_ ), 
+    vel_status = joint_velocity_in_.readNewest( joint_velocity_ );
 
   // If we don't get any position update, we don't write any new data to the ports
-  if(pos_status != RTT::NewData) {
+  if(pos_status != RTT::NewData || vel_status != RTT::NewData) {
     return;
   }
 
-  // Check the minimum requirements to compute the control command
-  if(vel_status == RTT::NewData || has_last_position_data_) {
-    // Trust a supplied velocity, or compute it from an exponentially-smothed finite difference
-    if(vel_status == RTT::NewData) {
-      // Trust the velocity input
-      joint_velocity_ = joint_velocity_raw_;
-    } else {
-      // Estimate the joint velocity if we don't get a joint velocity estimate
-      joint_velocity_ = 
-        (velocity_smoothing_factor_*(joint_position_ - joint_position_last_)/period)
-        + (1-velocity_smoothing_factor_)*(joint_velocity_);
-    }
-
-    // Read in the current commanded joint positions and velocities
-    // These commands can be sparse and not return new information each update tick
-    Eigen::VectorXd pos, vel;
-    RTT::FlowStatus 
-      pos_cmd_status = joint_position_cmd_in_.readNewest( pos ), 
-      vel_cmd_status = joint_velocity_cmd_in_.readNewest( vel );
-
-    if(pos_cmd_status == RTT::NewData && pos.size() == n_dof_ ) { joint_position_cmd_ = pos; }
-    else if(pos_cmd_status == RTT::NoData) { joint_position_cmd_ = joint_position_; }
-    if(vel_cmd_status == RTT::NewData && vel.size() == n_dof_ ) { joint_velocity_cmd_ = vel; }
-    else if(vel_cmd_status == RTT::NoData) { joint_velocity_cmd_.setZero(); }
-
-    joint_p_error_ = joint_position_cmd_ - joint_position_;
-    joint_d_error_ = joint_velocity_cmd_ - joint_velocity_;
-    joint_i_error_ = 
-      (joint_i_error_ + period*joint_p_error_).array()
-      .max(i_clamps_.array())
-      .min(-i_clamps_.array());
-
-    // Compute the command
-    joint_effort_ = (
-          p_gains_.array()*joint_p_error_.array()
-        + i_gains_.array()*joint_i_error_.array()                  
-        + d_gains_.array()*joint_d_error_.array()
-        ).matrix();
-
-    // Send joint efforts
-    joint_effort_out_.write(joint_effort_);
+  if(joint_position_.size() != n_dof_ || joint_velocity_.size() != n_dof_ ) {
+    this->error();
+    return;
   }
 
-  // Save the last joint position
-  joint_position_last_ = joint_position_;
-  has_last_position_data_ = true;
+  // Read in the current commanded joint positions and velocities
+  // These commands can be sparse and not return new information each update tick
+  RTT::FlowStatus 
+    pos_cmd_status = joint_position_cmd_in_.readNewest( joint_position_cmd_ ), 
+    vel_cmd_status = joint_velocity_cmd_in_.readNewest( joint_velocity_cmd_ );
+
+  if(pos_cmd_status != RTT::NewData || vel_cmd_status != RTT::NewData) {
+    return;
+  }
+
+  if(joint_position_cmd_.size() != n_dof_ || joint_velocity_cmd_.size() != n_dof_ ) {
+    this->error();
+    return;
+  }
+
+  joint_p_error_ = joint_position_cmd_ - joint_position_;
+  joint_d_error_ = joint_velocity_cmd_ - joint_velocity_;
+  joint_i_error_ = 
+    (joint_i_error_ + period*joint_p_error_).array()
+    .max(i_clamps_.array())
+    .min(-i_clamps_.array());
+
+  // Compute the command
+  joint_effort_ = (
+      p_gains_.array()*joint_p_error_.array()
+      + i_gains_.array()*joint_i_error_.array()                  
+      + d_gains_.array()*joint_d_error_.array()
+      ).matrix();
+
+  // Send joint efforts
+  joint_effort_out_.write(joint_effort_);
 }
 
 void JointPIDController::stopHook()
 {
+  joint_position_in_.clear();
+  joint_velocity_in_.clear();
+  joint_position_cmd_in_.clear();
+  joint_velocity_cmd_in_.clear();
 }
 
 void JointPIDController::cleanupHook()

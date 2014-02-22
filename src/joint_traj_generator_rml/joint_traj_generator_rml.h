@@ -39,9 +39,11 @@ namespace lcsr_controllers {
     double sampling_resolution_;
     Eigen::VectorXd 
       position_tolerance_,
+      velocity_tolerance_,
       max_velocities_,
       max_accelerations_,
       max_jerks_;
+    bool verbose_;
 
   protected:
     // RTT Ports
@@ -77,6 +79,7 @@ namespace lcsr_controllers {
           size_t n_dof, 
           bool flexible_ = false) :
         active(false),
+        achieved(false),
         flexible(flexible_),
         start_time(ros::Time(0,0)),
         goal_time(ros::Time(0,0)), 
@@ -87,6 +90,7 @@ namespace lcsr_controllers {
       { }
 
       bool active;
+      bool achieved;
       bool flexible;
       ros::Time start_time;
       ros::Time goal_time;
@@ -120,7 +124,7 @@ namespace lcsr_controllers {
         TrajSegments &segments);
 
     //! Update the one trajectory with points from another
-    static bool UpdateTrajectory(
+    static bool SpliceTrajectory(
         TrajSegments &current_segments,
         const TrajSegments &new_segments);
 
@@ -151,6 +155,16 @@ namespace lcsr_controllers {
     static void RMLLog(
         const RTT::LoggerLevel level,
         const boost::shared_ptr<RMLPositionInputParameters> rml_in);
+
+    void setMaxVelocity(const int i, const double d) {
+      rml_in_->SetMaxVelocityVectorElement(d,i);
+    }
+    void setMaxAcceleration(const int i, const double d) { 
+      rml_in_->SetMaxAccelerationVectorElement(d,i);
+    }
+    void setMaxJerk(const int i, const double d) {
+      rml_in_->SetMaxJerkVectorElement(d,i);
+    }
 
   protected:
 

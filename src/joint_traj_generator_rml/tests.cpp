@@ -115,7 +115,7 @@ TEST_F(StaticTest, SpliceLaterTrajectory)
       segments_new);
   EXPECT_EQ(segments_new.front().start_time, now + ros::Duration(10.0));
 
-  JointTrajGeneratorRML::UpdateTrajectory(segments_current, segments_new);
+  JointTrajGeneratorRML::SpliceTrajectory(segments_current, segments_new);
 
   EXPECT_EQ(segments_current.size(),2*n_base_traj_points); 
 }
@@ -137,7 +137,7 @@ TEST_F(StaticTest, SpliceEarlierTrajectory)
       segments_new);
   EXPECT_EQ(segments_new.front().start_time, now - ros::Duration(5.0));
 
-  JointTrajGeneratorRML::UpdateTrajectory(segments_current, segments_new);
+  JointTrajGeneratorRML::SpliceTrajectory(segments_current, segments_new);
 
   EXPECT_EQ(segments_current.size(),n_base_traj_points); 
 }
@@ -157,7 +157,7 @@ TEST_F(StaticTest, SpliceInterruptingTrajectory)
       now + ros::Duration(5.0),
       segments_new);
 
-  JointTrajGeneratorRML::UpdateTrajectory(segments_current, segments_new);
+  JointTrajGeneratorRML::SpliceTrajectory(segments_current, segments_new);
 
   EXPECT_EQ(segments_current.size(),1.5*n_base_traj_points); 
 }
@@ -194,6 +194,7 @@ public:
     task->max_velocities_ = max_velocities;
     task->max_accelerations_ = max_accelerations;
     task->max_jerks_ = max_jerks;
+    task->verbose_ = true;
   }
 };
 
@@ -527,19 +528,25 @@ TEST_F(InstanceTest, FullTraj)
 
   bool sampled_traj = true;
   ros::Time looptime = now;
-  while(sampled_traj) {
+  while(sampled_traj &&
+        segments.size() > 0 &&
+        !segments.front().achieved &&
+        (looptime < segments.back().goal_time + ros::Duration(20.0))) 
+  {
+    RTT::log(RTT::Debug) << (segments.front().flexible ? " - flexible " : " - inflexible ") <<segments.front().goal_time << " | " << looptime << RTT::endlog();
     sampled_traj = task->sampleTrajectory(
         looptime,
         joint_position, joint_velocity,
         rml, rml_in, rml_out, rml_flags,
         segments,
         joint_position_sample, joint_velocity_sample);
-    looptime = looptime + ros::Duration(0.002);
+    looptime = looptime + ros::Duration(0.1);
     joint_position = joint_position_sample;
     joint_velocity = joint_velocity_sample;
+    RTT::log(RTT::Debug) <<" - " <<joint_position.transpose()<<RTT::endlog();
   }
 
-  EXPECT_EQ(segments.size(),0);
+  EXPECT_EQ(segments.size(),1);
 }
 
 TEST_F(InstanceTest, FlexibleTraj)
@@ -585,19 +592,22 @@ TEST_F(InstanceTest, FlexibleTraj)
 
   bool sampled_traj = true;
   ros::Time looptime = now;
-  while(sampled_traj) {
+  while(sampled_traj &&
+        segments.size() > 0 &&
+        (looptime < segments.back().goal_time + ros::Duration(20.0))) 
+  {
     sampled_traj = task->sampleTrajectory(
         looptime,
         joint_position, joint_velocity,
         rml, rml_in, rml_out, rml_flags,
         segments,
         joint_position_sample, joint_velocity_sample);
-    looptime = looptime + ros::Duration(0.002);
+    looptime = looptime + ros::Duration(0.1);
     joint_position = joint_position_sample;
     joint_velocity = joint_velocity_sample;
   }
 
-  EXPECT_EQ(segments.size(),0);
+  EXPECT_EQ(segments.size(),1);
 }
 
 int main(int argc, char** argv) {
@@ -608,7 +618,7 @@ int main(int argc, char** argv) {
 
   RTT::Logger::log().setStdStream(std::cerr);
   RTT::Logger::log().mayLogStdOut(true);
-  //RTT::Logger::log().setLogLevel(RTT::Logger::Debug);
+  RTT::Logger::log().setLogLevel(RTT::Logger::Debug);
 
   // Import conman plugin
   if(!RTT::ComponentLoader::Instance()->import("conman", "" )) {
