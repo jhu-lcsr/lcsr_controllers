@@ -43,7 +43,7 @@ JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
   this->addProperty("max_accelerations",max_accelerations_).doc("Maximum accelerations for traj generation.");
   this->addProperty("max_jerks",max_jerks_).doc("Maximum jerks for traj generation.");
   this->addProperty("position_tolerance",position_tolerance_).doc("Maximum position error.");
-  this->addProperty("velocity_tolerance_",velocity_tolerance_).doc("Maximum velocity error.");
+  this->addProperty("velocity_tolerance",velocity_tolerance_).doc("Maximum velocity error.");
   this->addProperty("sampling_resolution",sampling_resolution_).doc("Sampling resolution in seconds.");
   this->addProperty("verbose",verbose_).doc("Verbose debug output control.");
   
@@ -372,10 +372,12 @@ bool JointTrajGeneratorRML::sampleTrajectory(
       double position_tracking_error = std::abs(rml_out->GetNewPositionVectorElement(i) - joint_position[i]);
       double velocity_tracking_error = std::abs(rml_out->GetNewVelocityVectorElement(i) - joint_velocity[i]);
 
-      if(position_tracking_error > position_tolerance_[i] || 
-         velocity_tracking_error > velocity_tolerance_[i])  
-      {
-        if(verbose_) RTT::log(RTT::Debug) << ("Tracking error tolerance has been violated.") << RTT::endlog(); 
+      if(position_tracking_error > position_tolerance_[i]) {
+        RTT::log(RTT::Debug) << "Joint " << i << " position error tolerance violated ("<<position_tracking_error<<" > "<<position_tolerance_[i]<<")" << RTT::endlog(); 
+        recompute_trajectory = true;
+      }
+      if(velocity_tracking_error > velocity_tolerance_[i])  {
+        RTT::log(RTT::Debug) << "Joint " << i << " velocity error tolerance violated ("<<velocity_tracking_error<<" > "<<velocity_tolerance_[i]<<")" << RTT::endlog(); 
         recompute_trajectory = true;
       }
     }
@@ -454,7 +456,7 @@ bool JointTrajGeneratorRML::sampleTrajectory(
         // S'all good.
         break;
       case ReflexxesAPI::RML_FINAL_STATE_REACHED:
-        // Remove the active segment from the trajectory
+        // Mark the active segment achieved
         if(!active_segment->achieved) {
           if(verbose_) RTT::log(RTT::Debug) << "Segment complete." << RTT::endlog();
           active_segment->achieved = true;
