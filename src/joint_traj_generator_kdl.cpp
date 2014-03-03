@@ -64,8 +64,8 @@ JointTrajGeneratorKDL::JointTrajGeneratorKDL(std::string const& name) :
 bool JointTrajGeneratorKDL::configureHook()
 {
   // ROS topics
-  if(!joint_position_cmd_ros_in_.createStream(rtt_roscomm::topic("~" + this->getName() + "/joint_position_cmd"))
-     || !joint_state_desired_out_.createStream(rtt_roscomm::topic("~" + this->getName() + "/joint_state_desired")))
+  if(!joint_position_cmd_ros_in_.createStream(rtt_roscomm::topic(std::string("~") + this->getName() + "/joint_position_cmd"))
+     || !joint_state_desired_out_.createStream(rtt_roscomm::topic(std::string("~") + this->getName() + "/joint_state_desired")))
   {
     RTT::log(RTT::Error) << "ROS Topics could not be streamed..." <<RTT::endlog();
     return false;
