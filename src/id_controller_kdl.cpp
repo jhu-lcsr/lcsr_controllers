@@ -11,7 +11,7 @@
 #include <rtt_rosparam/rosparam.h>
 
 #include <rtt_ros_tools/tools.h>
-#include <rtt_rostopic/rostopic.h>
+#include <rtt_roscomm/rtt_rostopic.h>
 #include <rtt_rosclock/rtt_rosclock.h>
 #include <kdl_urdf_tools/tools.h>
 #include "id_controller_kdl.h"
@@ -62,15 +62,12 @@ IDControllerKDL::IDControllerKDL(std::string const& name) :
   this->ports()->addPort("joint_effort_out", joint_effort_out_)
     .doc("Output port: nx1 vector of joint torques. (n joints)");
 
-  // Get an instance of the rtt_rostopic service requester
-  rtt_rostopic::ROSTopic rostopic;
-
   // Add the port and stream it to a ROS topic
   this->ports()->addPort("ext_wrenches_debug_out", ext_wrenches_debug_out_);
-  ext_wrenches_debug_out_.createStream(rostopic.connection("~/"+this->getName()+"/wrenches"));
+  ext_wrenches_debug_out_.createStream(rtt_roscomm::topic("~/"+this->getName()+"/wrenches"));
 
   this->ports()->addPort("cogs_debug_out", cogs_debug_out_);
-  cogs_debug_out_.createStream(rostopic.bufferedConnection("~/"+this->getName()+"/cogs",32));
+  cogs_debug_out_.createStream(rtt_roscomm::topicBuffer("~/"+this->getName()+"/cogs",32));
 }
 
 bool IDControllerKDL::configureHook()
