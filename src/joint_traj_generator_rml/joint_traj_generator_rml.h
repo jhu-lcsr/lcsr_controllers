@@ -32,6 +32,8 @@ namespace lcsr_controllers {
   {
   public:
     // RTT Properties
+    bool use_rosparam_;
+    bool use_rostopic_;
     std::string robot_description_;
     std::string root_link_;
     std::string tip_link_;

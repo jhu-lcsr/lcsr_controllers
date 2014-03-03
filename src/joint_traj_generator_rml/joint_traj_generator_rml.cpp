@@ -24,6 +24,8 @@ using namespace lcsr_controllers;
 JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
   TaskContext(name)
   // Properties
+  ,use_rosparam_(true)
+  ,use_rostopic_(true)
   ,robot_description_("")
   ,root_link_("")
   ,tip_link_("")
@@ -36,7 +38,8 @@ JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
   ,ros_publish_throttle_(0.02)
 {
   // Declare properties
-  this->addProperty("robot_description",robot_description_).doc("The WAM URDF xml string.");
+  this->addProperty("use_rosparam",use_rosparam_).doc("Fetch parameters from rosparam when configure() is called (true by default).");
+  this->addProperty("robot_description",robot_description_).doc("The URDF xml string.");
   this->addProperty("root_link",root_link_).doc("The root link for the controller.");
   this->addProperty("tip_link",tip_link_).doc("The tip link for the controller.");
   this->addProperty("max_velocities",max_velocities_).doc("Maximum velocities for traj generation.");
@@ -95,28 +98,40 @@ bool JointTrajGeneratorRML::configureHook()
   }
 
   // ROS parameters
-  boost::shared_ptr<rtt_rosparam::ROSParam> rosparam =
-    this->getProvider<rtt_rosparam::ROSParam>("rosparam");
-  
-  // Only get kinematics from robot description if n_dof_ hasn't been set
-  if(n_dof_ == 0) {
+  boost::shared_ptr<rtt_rosparam::ROSParam> rosparam;
+
+  if(use_rosparam_) {
+    // Get the rosparam service provider
+    rosparam = this->getProvider<rtt_rosparam::ROSParam>("rosparam");
+    
+    // Only get kinematics from robot description if n_dof_ hasn't been set
     rosparam->getAbsolute("robot_description");
+    rosparam->getComponentPrivate("n_dof");
     rosparam->getComponentPrivate("root_link");
     rosparam->getComponentPrivate("tip_link");
+  }
 
-    // Initialize kinematics (KDL tree, KDL chain, and #DOF)
+  // Initialize kinematics (KDL tree, KDL chain, and #DOF) from urdf
+  if(robot_description_.length() > 0) {
     urdf::Model urdf_model;
     KDL::Tree kdl_tree;
     KDL::Chain kdl_chain;
     if(!kdl_urdf_tools::initialize_kinematics_from_urdf(
-          robot_description_, root_link_, tip_link_,
-          n_dof_, kdl_chain, kdl_tree, urdf_model))
+            robot_description_, root_link_, tip_link_,
+            n_dof_, kdl_chain, kdl_tree, urdf_model))
     {
       RTT::log(RTT::Error) << "Could not initialize robot kinematics!" << RTT::endlog();
       return false;
     }
-  
   }
+
+  // Require some number of joints
+  if(n_dof_ == 0) {
+    RTT::log(RTT::Error) << "Number of degrees-of-freedom is zero. Please set this manually, via rosparam, or use an URDF with a root and tip link." << RTT::endlog();
+    return false;
+  }
+
+
   // Get individual joint properties from urdf and parameter server
   joint_names_.resize(n_dof_);
 
@@ -126,12 +141,14 @@ bool JointTrajGeneratorRML::configureHook()
   max_accelerations_.conservativeResize(n_dof_);
   max_jerks_.conservativeResize(n_dof_);
 
-  rosparam->getComponentPrivate("position_tolerance");
-  rosparam->getComponentPrivate("velocity_tolerance");
-  rosparam->getComponentPrivate("max_velocities");
-  rosparam->getComponentPrivate("max_accelerations");
-  rosparam->getComponentPrivate("max_jerks");
-  rosparam->getComponentPrivate("sampling_resolution");
+  if(use_rosparam_) {
+    rosparam->getComponentPrivate("position_tolerance");
+    rosparam->getComponentPrivate("velocity_tolerance");
+    rosparam->getComponentPrivate("max_velocities");
+    rosparam->getComponentPrivate("max_accelerations");
+    rosparam->getComponentPrivate("max_jerks");
+    rosparam->getComponentPrivate("sampling_resolution");
+  }
   
   // Resize IO vectors
   joint_position_.resize(n_dof_);

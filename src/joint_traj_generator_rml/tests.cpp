@@ -188,6 +188,7 @@ public:
     max_accelerations(Eigen::VectorXd::Constant(n_dof,5.0)),
     max_jerks(Eigen::VectorXd::Constant(n_dof,1.0))
   {
+    task->use_rosparam_ = false;
     task->n_dof_ = n_dof;
     task->sampling_resolution_ = sampling_resolution;
     task->position_tolerance_ = position_tolerance;
