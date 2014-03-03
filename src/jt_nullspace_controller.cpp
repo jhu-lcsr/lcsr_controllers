@@ -15,7 +15,7 @@
 #include <rtt_rosparam/rosparam.h>
 
 #include <rtt_ros_tools/tools.h>
-#include <rtt_rostopic/rostopic.h>
+#include <rtt_roscomm/rtt_rostopic.h>
 #include <rtt_rosclock/rtt_rosclock.h>
 #include <kdl_urdf_tools/tools.h>
 
@@ -96,18 +96,15 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   this->ports()->addPort("pose_twist_in", pose_twist_in_);
   this->ports()->addPort("joint_effort_out", joint_effort_out_);
 
-  // Get an instance of the rtt_rostopic service requester
-  rtt_rostopic::ROSTopic rostopic;
-
   // Add the port and stream it to a ROS topic
   this->ports()->addPort("err_wrench_debug_out", err_wrench_debug_out_);
-  err_wrench_debug_out_.createStream(rostopic.connection("~/"+this->getName()+"/err_wrench"));
+  err_wrench_debug_out_.createStream(rtt_roscomm::topic("~/"+this->getName()+"/err_wrench"));
 
   this->ports()->addPort("err_pose_debug_out", err_pose_debug_out_);
-  err_pose_debug_out_.createStream(rostopic.connection("~/"+this->getName()+"/err_pose"));
+  err_pose_debug_out_.createStream(rtt_roscomm::topic("~/"+this->getName()+"/err_pose"));
 
   this->ports()->addPort("pose_desired_in", pose_desired_in_);
-  pose_desired_in_.createStream(rostopic.connection("~/"+this->getName()+"/pose_desired"));
+  pose_desired_in_.createStream(rtt_roscomm::topic("~/"+this->getName()+"/pose_desired"));
 }
 
 bool JTNullspaceController::configureHook()

@@ -12,7 +12,7 @@
 
 #include <rtt_rosclock/rtt_rosclock.h>
 #include <rtt_rosparam/rosparam.h>
-#include <rtt_rostopic/rostopic.h>
+#include <rtt_roscomm/rtt_rostopic.h>
 
 #include <kdl_urdf_tools/tools.h>
 #include "joint_traj_generator_kdl.h"
@@ -64,16 +64,8 @@ JointTrajGeneratorKDL::JointTrajGeneratorKDL(std::string const& name) :
 bool JointTrajGeneratorKDL::configureHook()
 {
   // ROS topics
-  rtt_rostopic::ROSTopic rostopic;
-  if(rostopic.ready()) {
-    RTT::log(RTT::Info) << "ROS Topics ready..." <<RTT::endlog();
-  } else {
-    RTT::log(RTT::Error) << "ROS Topics not ready..." <<RTT::endlog();
-    return false;
-  }
-
-  if(!joint_position_cmd_ros_in_.createStream(rostopic.connection("~" + this->getName() + "/joint_position_cmd"))
-     || !joint_state_desired_out_.createStream(rostopic.connection("~" + this->getName() + "/joint_state_desired")))
+  if(!joint_position_cmd_ros_in_.createStream(rtt_roscomm::topic("~" + this->getName() + "/joint_position_cmd"))
+     || !joint_state_desired_out_.createStream(rtt_roscomm::topic("~" + this->getName() + "/joint_state_desired")))
   {
     RTT::log(RTT::Error) << "ROS Topics could not be streamed..." <<RTT::endlog();
     return false;
