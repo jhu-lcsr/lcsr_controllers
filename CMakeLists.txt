@@ -6,10 +6,7 @@ find_package(catkin REQUIRED
   COMPONENTS 
   rtt_ros 
   rtt_roscomm
-  rtt_rosparam
   rtt_ros_tools
-  rtt_sensor_msgs
-  rtt_trajectory_msgs
   kdl_urdf_tools
   kdl_conversions
   control_toolbox
@@ -54,6 +51,7 @@ orocos_component(${PROJECT_NAME}
 
 target_link_libraries(
   ${PROJECT_NAME}
+  ${orocos_kdl_LIBRARIES}
   ${USE_OROCOS_LIBRARIES} 
   ${catkin_LIBRARIES})
 
