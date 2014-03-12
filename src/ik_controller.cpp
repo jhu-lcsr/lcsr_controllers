@@ -14,7 +14,7 @@
 #include <rtt_roscomm/rtt_rostopic.h>
 #include <rtt_rosclock/rtt_rosclock.h>
 #include <kdl_urdf_tools/tools.h>
-#include "id_controller_kdl.h"
+#include "ik_controller.h"
 
 using namespace lcsr_controllers;
 
