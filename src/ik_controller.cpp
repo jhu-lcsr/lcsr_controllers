@@ -10,6 +10,8 @@
 
 #include <rtt_rosparam/rosparam.h>
 
+#include <tf_conversions/tf_kdl.h>
+
 #include <rtt_ros_tools/tools.h>
 #include <rtt_roscomm/rtt_rostopic.h>
 #include <rtt_rosclock/rtt_rosclock.h>
@@ -24,50 +26,50 @@ IKController::IKController(std::string const& name) :
   ,robot_description_("")
   ,root_link_("")
   ,tip_link_("")
-  ,gravity_(3)
+  ,target_frame_("")
   // Working variables
   ,n_dof_(0)
   ,kdl_tree_()
   ,kdl_chain_()
-  ,id_solver_(NULL)
-  ,ext_wrenches_()
   ,positions_()
-  ,accelerations_()
   ,torques_()
-  // Throttles
-  ,debug_throttle_(0.05)
-  ,compensate_end_effector_(true)
+  ,kp_(7,0.0)
+  ,kd_(7,0.0)
 {
-  // Zero gravity
-  gravity_.setZero();
-    
   // Declare properties
   this->addProperty("robot_description",robot_description_)
     .doc("The WAM URDF xml string.");
-  // TODO: Get gravity from world frame
-  this->addProperty("gravity",gravity_)
-    .doc("The gravity vector in the root link frame.");
+  this->addProperty("kd",kd_);
+  this->addProperty("kp",kp_);
+
   this->addProperty("root_link",root_link_)
     .doc("The root link for the controller.");
   this->addProperty("tip_link",tip_link_)
     .doc("The tip link for the controller.");
-  this->addProperty("compensate_end_effector",compensate_end_effector_)
-    .doc("Will compute a wrench on the tip link if true.");
+  this->addProperty("target_frame",target_frame_)
+    .doc("The target frame to track with tip_link.");
+  //this->addProperty("compensate_end_effector",compensate_end_effector_)
+  //  .doc("Will compute a wrench on the tip link if true.");
 
   // Configure data ports
-  this->ports()->addPort("joint_position_in", joint_position_in_);
-  this->ports()->addPort("joint_velocity_in", joint_velocity_in_);
-  this->ports()->addPort("end_effector_masses_in", end_effector_masses_in_)
-    .doc("Additional masses rigidly attached to the end-effector. Given as (x,y,z,m) in the coordinate frame given by the tip_link property of this component");
-  this->ports()->addPort("joint_effort_out", joint_effort_out_)
+  this->ports()->addPort("positions_in", positions_in_port_)
+    .doc("Input port: nx1 vector of joint positions. (n joints)");
+  this->ports()->addPort("positions_out", positions_out_port_)
+    .doc("Output port: nx1 vector of desired joint positins. (n joints)");
+  this->ports()->addPort("torques_out", torques_out_port_)
     .doc("Output port: nx1 vector of joint torques. (n joints)");
+  this->ports()->addPort("trajectories_out", trajectories_out_port_)
+    .doc("Output port: nx1 vector of joint trajectories. (n joints)");
+
+  this->addOperation("testIK", &IKController::test_ik, this, RTT::OwnThread)
+    .doc("Test the IK computation.");
 
   // Add the port and stream it to a ROS topic
-  this->ports()->addPort("ext_wrenches_debug_out", ext_wrenches_debug_out_);
-  ext_wrenches_debug_out_.createStream(rtt_roscomm::topic("~/"+this->getName()+"/wrenches"));
+  this->ports()->addPort("trajectories_debug_out", trajectories_debug_out_);
+  trajectories_debug_out_.createStream(rtt_roscomm::topic("~/"+this->getName()+"/trajectories"));
 
-  this->ports()->addPort("cogs_debug_out", cogs_debug_out_);
-  cogs_debug_out_.createStream(rtt_roscomm::topicBuffer("~/"+this->getName()+"/cogs",32));
+  this->ports()->addPort("torques_debug_out", torques_debug_out_);
+  torques_debug_out_.createStream(rtt_roscomm::topicBuffer("~/"+this->getName()+"/torques",32));
 }
 
 bool IKController::configureHook()
@@ -79,7 +81,17 @@ bool IKController::configureHook()
   // Get private parameters
   rosparam->getComponentPrivate("root_link");
   rosparam->getComponentPrivate("tip_link");
-  rosparam->getComponentPrivate("gravity");
+  rosparam->getComponentPrivate("target_frame");
+  rosparam->getComponentPrivate("kp");
+  rosparam->getComponentPrivate("kd");
+
+  if(this->hasPeer("tf")) {
+    TaskContext* tf_task = this->getPeer("tf");
+    tf_lookup_transform_ = tf_task->getOperation("lookupTransform"); // void reset(void)
+  } else {
+    ROS_ERROR("IKController controller is not connected to tf!");
+    return false;
+  }
 
   RTT::log(RTT::Debug) << "Initializing kinematic and dynamic parameters from \"" << root_link_ << "\" to \"" << tip_link_ <<"\"" << RTT::endlog();
 
@@ -93,167 +105,169 @@ bool IKController::configureHook()
     return false;
   }
 
-  // Create a PoseStamped message for each center of gravity
-  for(std::vector<KDL::Segment>::const_iterator it=kdl_chain_.segments.begin();
-      it != kdl_chain_.segments.end();
-      ++it)
-  {
-    visualization_msgs::Marker cog_pose;
-    cog_pose.header.frame_id = it->getName();
-    cog_pose.ns = it->getName();
-    cog_pose.type = visualization_msgs::Marker::SPHERE;
-    cog_pose.frame_locked = true;
-    cog_pose.scale.x = 0.02;
-    cog_pose.scale.y = 0.02;
-    cog_pose.scale.z = 0.02;
-    cog_pose.color.r = 28.0/255.0;
-    cog_pose.color.g = 217.0/255.0;
-    cog_pose.color.b = 214.0/255.0;
-    cog_pose.color.a = 128.0;
-    cog_pose.pose.position.x = it->getInertia().getCOG().x();
-    cog_pose.pose.position.y = it->getInertia().getCOG().y();
-    cog_pose.pose.position.z = it->getInertia().getCOG().z();
-
-    cogs_msgs_.push_back(cog_pose);
+  if(kp_.size() < n_dof_ || kd_.size() < n_dof_) {
+    RTT::log(RTT::Error) << "Not enough gains!" << RTT::endlog();
   }
 
-  // Create inverse dynamics chainsolver
-  id_solver_.reset(
-      new KDL::ChainIdSolver_RNE(
-        kdl_chain_,
-        KDL::Vector(gravity_[0],gravity_[1],gravity_[2])));
-
-  // Create the forward kinematics solver
-  fk_solver_.reset( new KDL::ChainFkSolverPos_recursive( kdl_chain_ ) );
-
-  // Resize IO vectors
-  joint_position_.resize(n_dof_);
-  joint_velocity_.resize(n_dof_);
-  joint_acceleration_.resize(n_dof_);
-  joint_effort_.resize(n_dof_);
-
-  // Resize working vectors
+  // Resize working variables
   positions_.resize(n_dof_);
-  velocities_.resize(n_dof_);
-  accelerations_.resize(n_dof_);
-  ext_wrenches_.resize(kdl_chain_.getNrOfSegments());
+  positions_des_.resize(n_dof_);
+  joint_limits_min_.resize(n_dof_);
+  joint_limits_max_.resize(n_dof_);
   torques_.resize(n_dof_);
 
-  // Initialize the wrenches
-  for(size_t i=0; i<kdl_chain_.getNrOfSegments(); i++) {
-    ext_wrenches_[i] = KDL::Wrench::Zero();
+  // Get joint limits from URDF model
+  {
+    unsigned int i=0;
+    for(std::vector<KDL::Segment>::const_iterator it=kdl_chain_.segments.begin();
+        it != kdl_chain_.segments.end();
+        it++)
+    {
+      joint_limits_min_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->lower;
+      joint_limits_max_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->upper;
+      i++;
+    }
   }
 
+  // Construct trajectory message
+  trajectory_.joint_names.clear();
+  trajectory_.points.clear();
+
+  for(std::vector<KDL::Segment>::const_iterator it=kdl_chain_.segments.begin();
+      it != kdl_chain_.segments.end();
+      it++)
+  {
+    trajectory_.joint_names.push_back(it->getJoint().getName());
+  }
+
+  trajectory_msgs::JointTrajectoryPoint single_point;
+  single_point.time_from_start = ros::Duration(0.005);
+  single_point.positions.resize(n_dof_);
+  single_point.velocities.resize(n_dof_);
+  std::fill(single_point.positions.begin(),single_point.positions.end(),0.0);
+  std::fill(single_point.velocities.begin(),single_point.velocities.end(),0.0);
+  trajectory_.points.push_back(single_point);
+
+
+  // Initialize IK solver
+  kdl_fk_solver_pos_.reset(
+      new KDL::ChainFkSolverPos_recursive(kdl_chain_));
+  kdl_ik_solver_vel_.reset(
+      new KDL::ChainIkSolverVel_pinv(
+        kdl_chain_,
+        1.0E-6,
+        150));
+  kdl_ik_solver_top_.reset(
+      new KDL::ChainIkSolverPos_NR(
+        kdl_chain_,
+        //joint_limits_min_,
+        //joint_limits_max_,
+        *kdl_fk_solver_pos_,
+        *kdl_ik_solver_vel_,
+        250,
+        1.0E-6));
+
+  // Zero out torque data
+  torques_.data.setZero();
+  positions_.q.data.setZero();
+  positions_.qdot.data.setZero();
+  positions_des_.q.data.setZero();
+  positions_des_.qdot.data.setZero();
+
   // Prepare ports for realtime processing
-  joint_effort_out_.setDataSample(joint_effort_);
+  positions_out_port_.setDataSample(positions_des_);
+  torques_out_port_.setDataSample(torques_);
+  trajectories_out_port_.setDataSample(trajectory_);
 
   return true;
 }
 
+void IKController::test_ik() { this->compute_ik(true); }
+
+void IKController::compute_ik(bool debug)
+{
+  // Read in the current joint positions
+  positions_in_port_.readNewest( positions_ );
+
+  // Get transform from the root link frame to the target frame
+  try{
+    tip_frame_msg_ = tf_lookup_transform_("/"+root_link_,target_frame_);
+  } catch (std::exception &ex) {
+    RTT::log(RTT::Error) << "Could not look up transform from \""<<root_link_<<
+      "\" to \""<<target_frame_<<"\": "<<ex.what() << RTT::endlog();
+    this->stop();
+  }
+  tf::transformMsgToTF(tip_frame_msg_.transform, tip_frame_tf_);
+  tf::TransformTFToKDL(tip_frame_tf_,tip_frame_des_);
+
+  // Compute joint coordinates of the target tip frame
+  KDL::JntArray ik_hint(n_dof_);
+  ik_hint.data = positions_.q.data;
+
+  kdl_ik_solver_top_->CartToJnt(ik_hint, tip_frame_des_, positions_des_.q);
+
+  RTT::log(RTT::Debug)<<"Unwrapped angles: "<<(positions_des_.q.data.transpose)()<<RTT::endlog();
+
+  // Unwrap angles
+  for(unsigned int i=0; i<n_dof_; i++) {
+    if(positions_des_.q(i) > 0) {
+      positions_des_.q(i) = fmod(positions_des_.q(i)+M_PI,2.0*M_PI)-M_PI;
+    } else {
+      positions_des_.q(i) = fmod(positions_des_.q(i)-M_PI,2.0*M_PI)+M_PI;
+    }
+  }
+
+  RTT::log(RTT::Debug)<<"Wrapped angles: "<<(positions_des_.q.data.transpose())<<RTT::endlog();
+
+  // Servo in jointspace to the appropriate joint coordinates
+  for(unsigned int i=0; i<n_dof_; i++) {
+    torques_(i) =
+      kp_[i]*(positions_des_.q(i) - positions_.q(i))
+      + kd_[i]*(positions_des_.qdot(i) - positions_.qdot(i));
+  }
+
+  if(debug) {
+    ROS_INFO_STREAM("Current position: "<<positions_.q.data.transpose());
+    ROS_INFO_STREAM("Current velocity: "<<positions_.qdot.data.transpose());
+    ROS_INFO_STREAM("IK result: "<<positions_des_.q.data.transpose());
+    ROS_INFO_STREAM("Displacement: "<<(positions_des_.q.data-positions_.q.data).transpose());
+    ROS_INFO_STREAM("Torques: "<<torques_.data.transpose());
+  }
+}
+
 bool IKController::startHook()
 {
-  // Zero accelerations
-  joint_acceleration_.setZero();
-  // Zero out torque data
-  torques_.data.setZero();
+  try{
+    tip_frame_msg_ = tf_lookup_transform_(root_link_,target_frame_);
+  } catch (std::exception &ex) {
+    RTT::log(RTT::Error)<<"Could not look up transform from \""<<root_link_<<"\" to \""<<target_frame_<<"\": "<<ex.what()<<RTT::endlog();
+    return false;
+  }
   return true;
 }
 
 void IKController::updateHook()
 {
-  // Read in the current joint positions & velocities
-  bool new_pos_data = joint_position_in_.readNewest( joint_position_ ) == RTT::NewData;
-  bool new_vel_data = joint_velocity_in_.readNewest( joint_velocity_ ) == RTT::NewData;
+  // Compute the inverse kinematics solution
+  this->compute_ik(false);
 
-  // Read all the EE masses
-  bool new_ee_data = false;
+  // Send traj target
+  if(trajectories_out_port_.connected()) {
+    trajectory_.header.stamp = ros::Time(0,0);//rtt_ros_tools::ros_rt_now() + ros::Duration(1.0);
 
-  double ee_mass = 0;
-  KDL::Vector ee_cog(0,0,0);
-
-  while(end_effector_masses_in_.read( end_effector_mass_ ) == RTT::NewData) 
-  {
-    // Make sure the new mass is well-posed
-    if(end_effector_mass_.size() == 4 && end_effector_mass_[3] > 1E-4) 
-    {
-      // Update EE cog
-      KDL::Vector new_cog(end_effector_mass_[0], end_effector_mass_[1], end_effector_mass_[2]);
-      double new_mass = end_effector_mass_[3];
-      ee_cog = (ee_cog*ee_mass + new_cog*new_mass) / (ee_mass + new_mass);
-      // Update EE mass
-      ee_mass += new_mass;
-      new_ee_data = true;
+    for(size_t i=0; i<n_dof_; i++) {
+      trajectory_.points[0].positions[i] = positions_des_.q(i);
+      trajectory_.points[0].velocities[i] = positions_des_.qdot(i);
     }
+
+    trajectories_out_port_.write( trajectory_ );
   }
 
-  // Update the ee inertia
-  if(new_ee_data) {
-    ee_inertia = KDL::RigidBodyInertia( ee_mass, ee_cog );  
-  }
+  // Send position target
+  positions_out_port_.write( positions_des_ );
 
-  if(new_pos_data && new_vel_data) {
-    // Get JntArray structures from pos/vel
-    positions_.data = joint_position_;
-    velocities_.data = joint_velocity_;
-
-    // Compute wwrenches on the end-effector
-    if(compensate_end_effector_) {
-      // Compute the tip frame from the current joint position
-      KDL::Frame tip_frame;
-      int ret = fk_solver_->JntToCart(positions_, tip_frame);
-      // Compute gravity vector in the tip frame
-      KDL::Vector tip_gravity = tip_frame.M.Inverse() * KDL::Vector(gravity_[0], gravity_[1], gravity_[2]);
-      KDL::Twist tip_gravity_twist(tip_gravity, KDL::Vector::Zero()); //TODO: Add centripetal acceleration (v*r^2)
-      ee_wrench = ee_inertia * tip_gravity_twist;
-      // Compute the external wrench on the tip link
-      // Set the wrench (in root_link_ coordinates)
-      ext_wrenches_.back() = ee_wrench;
-    } else { 
-      // Zero the last wrench
-      ext_wrenches_.back() = KDL::Wrench::Zero();
-    }
-
-    // Compute inverse dynamics
-    // This computes the torques on each joint of the arm as a function of
-    // the arm's joint-space position, velocities, accelerations, external
-    // forces/torques and gravity.
-    if(id_solver_->CartToJnt(
-          positions_,
-          velocities_,
-          accelerations_,
-          ext_wrenches_,
-          torques_) != 0)
-    {
-      RTT::log(RTT::Error) << "Could not compute joint torques!" << RTT::endlog();
-    }
-
-    // Store the effort command
-    joint_effort_ = torques_.data;
-
-    // Send joint positions
-    joint_effort_out_.write( joint_effort_ );
-
-    // Debug visualization
-    if(this->debug_throttle_.ready(0.05)) {
-      wrench_msg_.header.frame_id = tip_link_;
-      wrench_msg_.header.stamp = rtt_rosclock::host_rt_now();
-      wrench_msg_.wrench.force.x = ext_wrenches_.back().force.x();
-      wrench_msg_.wrench.force.y = ext_wrenches_.back().force.y();
-      wrench_msg_.wrench.force.z = ext_wrenches_.back().force.z();
-      wrench_msg_.wrench.torque.x = ext_wrenches_.back().torque.x();
-      wrench_msg_.wrench.torque.y = ext_wrenches_.back().torque.y();
-      wrench_msg_.wrench.torque.z = ext_wrenches_.back().torque.z();
-      ext_wrenches_debug_out_.write(wrench_msg_);
-
-      for(std::vector<visualization_msgs::Marker>::iterator it = cogs_msgs_.begin();
-          it != cogs_msgs_.end();
-          ++it)
-      {
-        it->header.stamp = wrench_msg_.header.stamp;
-        cogs_debug_out_.write(*it);
-      }
-    }
-  }
+  // Send joint torques
+  torques_out_port_.write( torques_ );
 }
 
 void IKController::stopHook()
@@ -263,3 +277,5 @@ void IKController::stopHook()
 void IKController::cleanupHook()
 {
 }
+
+

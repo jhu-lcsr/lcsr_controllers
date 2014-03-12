@@ -11,12 +11,24 @@
 #include <kdl/jntarrayvel.hpp>
 #include <kdl/tree.hpp>
 #include <kdl/chain.hpp>
-#include <kdl/chainidsolver_recursive_newton_euler.hpp>
+//#include <kdl/chainidsolver_recursive_newton_euler.hpp>
+//#include <kdl/chainfksolverpos_recursive.hpp>
+#include <kdl/chainjnttojacsolver.hpp>
 #include <kdl/chainfksolverpos_recursive.hpp>
+#include <kdl/chainiksolverpos_nr.hpp>
+#include <kdl/chainiksolverpos_nr_jl.hpp>
+#include <kdl/chainiksolvervel_wdls.hpp>
+#include <kdl/chainiksolvervel_pinv.hpp>
+#include <kdl/chainiksolvervel_pinv_nso.hpp>
+#include <kdl/chainiksolvervel_pinv_givens.hpp>
 
-#include <rtt_ros_tools/throttles.h>
+//#include <rtt_ros_tools/throttles.h>
+#include <tf/tf.h>
 
-#include <geometry_msgs/WrenchStamped.h>
+//#include <geometry_msgs/WrenchStamped.h>
+#include <trajectory_msgs/JointTrajectory.h>
+#include <geometry_msgs/TransformStamped.h>
+
 #include <visualization_msgs/Marker.h>
 
 namespace lcsr_controllers {
@@ -26,17 +38,24 @@ namespace lcsr_controllers {
     std::string robot_description_;
     std::string root_link_;
     std::string tip_link_;
-    std::string wrench_link_;
-    Eigen::VectorXd gravity_;
+    std::string target_frame_;
+    //Eigen::VectorXd gravity_;
+
+    std::vector<double> kp_; // proportional gains
+    std::vector<double> kd_; // derivative gains
 
     // RTT Ports
-    RTT::InputPort<Eigen::VectorXd> joint_position_in_;
-    RTT::InputPort<Eigen::VectorXd> joint_velocity_in_;
-    RTT::InputPort<Eigen::VectorXd> end_effector_masses_in_;
-    RTT::OutputPort<Eigen::VectorXd> joint_effort_out_;
+    RTT::InputPort<KDL::JntArrayVel> positions_in_port_;
+    RTT::OutputPort<KDL::JntArrayVel> positions_out_port_;
+    RTT::OutputPort<KDL::JntArray> torques_out_port_;
+    RTT::OutputPort<trajectory_msgs::JointTrajectory> trajectories_out_port_;
 
-    RTT::OutputPort<geometry_msgs::WrenchStamped> ext_wrenches_debug_out_;
-    RTT::OutputPort<visualization_msgs::Marker> cogs_debug_out_;
+    // RTT Debug Ports
+    RTT::OutputPort<KDL::JntArray> torques_debug_out_;
+    RTT::OutputPort<trajectory_msgs::JointTrajectory> trajectories_debug_out_;
+
+    RTT::OperationCaller<geometry_msgs::TransformStamped(const std::string&,
+      const std::string&)> tf_lookup_transform_;
 
   public:
     IKController(std::string const& name);
@@ -46,39 +65,39 @@ namespace lcsr_controllers {
     virtual void stopHook();
     virtual void cleanupHook();
 
+    void test_ik();
+    void compute_ik(bool debug);
   private:
 
     // Kinematic properties
     unsigned int n_dof_;
-    KDL::Tree kdl_tree_;
     KDL::Chain kdl_chain_;
+    KDL::Tree kdl_tree_;
+    //urdf::Model urdf_model_;
 
-    // Solvers
-    boost::scoped_ptr<KDL::ChainIdSolver_RNE> id_solver_;
-    boost::scoped_ptr<KDL::ChainFkSolverPos_recursive> fk_solver_;
 
     // Working variables
-    KDL::JntArray positions_;
-    KDL::JntArray velocities_;
-    KDL::JntArray accelerations_;
-    KDL::Wrenches ext_wrenches_;
+    KDL::JntArrayVel positions_;
+    KDL::JntArrayVel positions_des_;
     KDL::JntArray torques_;
 
-    Eigen::VectorXd 
-      joint_position_,
-      joint_velocity_,
-      joint_acceleration_,
-      end_effector_mass_,
-      joint_effort_;
+    // Joint limits
+    KDL::JntArray joint_limits_min_;
+    KDL::JntArray joint_limits_max_;
 
-    KDL::RigidBodyInertia ee_inertia;
-    KDL::Wrench ee_wrench;
+    // KDL IK solver which accounts for joint limits
+    boost::scoped_ptr<KDL::ChainIkSolverPos> kdl_ik_solver_top_;
+    boost::scoped_ptr<KDL::ChainIkSolverVel> kdl_ik_solver_vel_;
 
-    geometry_msgs::WrenchStamped wrench_msg_;
-    std::vector<visualization_msgs::Marker> cogs_msgs_;
+    // KDL FK solver
+    boost::scoped_ptr<KDL::ChainFkSolverPos> kdl_fk_solver_pos_;
 
-    rtt_ros_tools::PeriodicThrottle debug_throttle_;
-    bool compensate_end_effector_;
+    geometry_msgs::TransformStamped tip_frame_msg_;
+    tf::Transform tip_frame_tf_;
+    KDL::Frame tip_frame_;
+    KDL::Frame tip_frame_des_;
+
+    trajectory_msgs::JointTrajectory trajectory_;
   };
 }
 
