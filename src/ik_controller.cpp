@@ -175,8 +175,8 @@ bool IKController::configureHook()
   positions_des_.qdot.data.setZero();
 
   // Prepare ports for realtime processing
-  positions_out_port_.setDataSample(positions_des_);
-  torques_out_port_.setDataSample(torques_);
+  positions_out_port_.setDataSample(positions_des_.q.data);
+  torques_out_port_.setDataSample(torques_.data);
   trajectories_out_port_.setDataSample(trajectory_);
 
   return true;
@@ -187,7 +187,7 @@ void IKController::test_ik() { this->compute_ik(true); }
 void IKController::compute_ik(bool debug)
 {
   // Read in the current joint positions
-  positions_in_port_.readNewest( positions_ );
+  positions_in_port_.readNewest( positions_.q.data );
 
   // Get transform from the root link frame to the target frame
   try{
@@ -264,10 +264,10 @@ void IKController::updateHook()
   }
 
   // Send position target
-  positions_out_port_.write( positions_des_ );
+  positions_out_port_.write( positions_des_.q.data );
 
   // Send joint torques
-  torques_out_port_.write( torques_ );
+  torques_out_port_.write( torques_.data );
 }
 
 void IKController::stopHook()

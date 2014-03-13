@@ -39,19 +39,18 @@ namespace lcsr_controllers {
     std::string root_link_;
     std::string tip_link_;
     std::string target_frame_;
-    //Eigen::VectorXd gravity_;
 
     std::vector<double> kp_; // proportional gains
     std::vector<double> kd_; // derivative gains
 
     // RTT Ports
-    RTT::InputPort<KDL::JntArrayVel> positions_in_port_;
-    RTT::OutputPort<KDL::JntArrayVel> positions_out_port_;
-    RTT::OutputPort<KDL::JntArray> torques_out_port_;
+    RTT::InputPort<Eigen::VectorXd> positions_in_port_;
+    RTT::OutputPort<Eigen::VectorXd> positions_out_port_;
+    RTT::OutputPort<Eigen::VectorXd> torques_out_port_;
     RTT::OutputPort<trajectory_msgs::JointTrajectory> trajectories_out_port_;
 
     // RTT Debug Ports
-    RTT::OutputPort<KDL::JntArray> torques_debug_out_;
+    RTT::OutputPort<Eigen::VectorXd> torques_debug_out_;
     RTT::OutputPort<trajectory_msgs::JointTrajectory> trajectories_debug_out_;
 
     RTT::OperationCaller<geometry_msgs::TransformStamped(const std::string&,
