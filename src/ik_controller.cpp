@@ -68,8 +68,8 @@ IKController::IKController(std::string const& name) :
   this->ports()->addPort("trajectories_debug_out", trajectories_debug_out_);
   trajectories_debug_out_.createStream(rtt_roscomm::topic("~/"+this->getName()+"/trajectories"));
 
-  this->ports()->addPort("torques_debug_out", torques_debug_out_);
-  torques_debug_out_.createStream(rtt_roscomm::topicBuffer("~/"+this->getName()+"/torques",32));
+  //this->ports()->addPort("torques_debug_out", torques_debug_out_);
+  //torques_debug_out_.createStream(rtt_roscomm::topicBuffer("~/"+this->getName()+"/torques",32));
 }
 
 bool IKController::configureHook()
