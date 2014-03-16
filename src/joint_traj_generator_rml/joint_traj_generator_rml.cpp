@@ -70,6 +70,7 @@ JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
   this->ports()->addPort("joint_traj_point_cmd_in", joint_traj_point_cmd_in_);
   this->ports()->addPort("joint_traj_cmd_in", joint_traj_cmd_in_);
   this->ports()->addPort("joint_state_desired_out", joint_state_desired_out_);
+  this->ports()->addPort("controller_state_out", controller_state_out_);
 
   // Load Conman interface
   conman_hook_ = conman::Hook::GetHook(this);
@@ -83,7 +84,8 @@ bool JointTrajGeneratorRML::configureHook()
   // ROS topics
   if(   !joint_traj_cmd_in_.createStream(rtt_roscomm::topic("~" + this->getName() + "/joint_traj_cmd"))
      || !joint_traj_point_cmd_in_.createStream(rtt_roscomm::topic("~" + this->getName() + "/joint_traj_point_cmd"))
-     || !joint_state_desired_out_.createStream(rtt_roscomm::topic("~" + this->getName() + "/joint_state_desired")))
+     || !joint_state_desired_out_.createStream(rtt_roscomm::topic("~" + this->getName() + "/joint_state_desired"))
+     || !controller_state_out_.createStream(rtt_roscomm::topic("~" + this->getName() + "/controller_state")))
   {
     RTT::log(RTT::Error) << "ROS Topics could not be streamed..." <<RTT::endlog();
     return false;
@@ -115,6 +117,19 @@ bool JointTrajGeneratorRML::configureHook()
       RTT::log(RTT::Error) << "Could not initialize robot kinematics!" << RTT::endlog();
       return false;
     }
+
+    // Get joint names
+    joint_names_.clear();
+    joint_names_.reserve(n_dof_);
+    int j=0;
+    for(std::vector<KDL::Segment>::iterator it = kdl_chain.segments.begin();
+        it != kdl_chain.segments.end();
+        ++it)
+    {
+      joint_names_.push_back(it->getJoint().getName());
+      joint_name_index_map_[joint_names_.back()] = j;
+      j++;
+    }
   }
 
   // Require some number of joints
@@ -124,9 +139,8 @@ bool JointTrajGeneratorRML::configureHook()
   }
 
 
-  // Get individual joint properties from urdf and parameter server
-  joint_names_.resize(n_dof_);
 
+  // Get individual joint properties from urdf and parameter server
   position_tolerance_.conservativeResize(n_dof_);
   velocity_tolerance_.conservativeResize(n_dof_);
   max_velocities_.conservativeResize(n_dof_);
@@ -146,8 +160,12 @@ bool JointTrajGeneratorRML::configureHook()
   joint_position_.resize(n_dof_);
   joint_position_cmd_.resize(n_dof_);
   joint_position_sample_.resize(n_dof_);
+  joint_position_err_.resize(n_dof_);
   joint_velocity_.resize(n_dof_);
   joint_velocity_sample_.resize(n_dof_);
+  joint_velocity_err_.resize(n_dof_);
+
+  index_permutation_.resize(n_dof_);
 
   // Configure RML structures
   return this->configureRML(rml_, rml_in_, rml_out_, rml_flags_);
@@ -230,14 +248,13 @@ bool JointTrajGeneratorRML::SpliceTrajectory(
 
 bool JointTrajGeneratorRML::TrajectoryMsgToSegments(
     const trajectory_msgs::JointTrajectory &msg,
+    const std::vector<size_t> &ip,
     const size_t n_dof,
     const ros::Time new_traj_start_time,
     TrajSegments &segments)
 {
   // Clear the output segment list
   segments.clear();
-
-  // TODO: Permute the joint names properly
   
   // Make sure the traj isn't empty
   if(msg.points.size() == 0) {
@@ -280,10 +297,12 @@ bool JointTrajGeneratorRML::TrajectoryMsgToSegments(
     new_segment.goal_time = new_traj_start_time + it->time_from_start;
     new_segment.expected_time = new_segment.goal_time;
 
-    // Copy in the data
-    if(it->positions.size() == n_dof) std::copy(it->positions.begin(), it->positions.end(), new_segment.goal_positions.data());
-    if(it->velocities.size() == n_dof) std::copy(it->velocities.begin(), it->velocities.end(), new_segment.goal_velocities.data());
-    if(it->accelerations.size() == n_dof) std::copy(it->accelerations.begin(), it->accelerations.end(), new_segment.goal_accelerations.data());
+    // Copy in the data (permuted appropriately)
+    for(int j=0; j<n_dof; j++) {
+      if(j < it->positions.size()) new_segment.goal_positions(ip[j]) = it->positions[j];
+      if(j < it->velocities.size()) new_segment.goal_velocities(ip[j]) = it->velocities[j];
+      if(j < it->accelerations.size()) new_segment.goal_accelerations(ip[j]) = it->accelerations[j];
+    }
 
     segments.push_back(new_segment);
   }
@@ -569,12 +588,19 @@ void JointTrajGeneratorRML::updateHook()
 
     // Create a unary trajectory
     trajectory_msgs::JointTrajectory unary_joint_traj;
+    unary_joint_traj.header.stamp = rtt_now;
     unary_joint_traj.points.push_back(joint_traj_point_cmd_);
+
+    // Reset index permutation
+    for(int joint_index=0; joint_index<n_dof_; joint_index++) {
+      index_permutation_[joint_index] = joint_index;
+    }
 
     // Convert the trajectory message to a list of segments for splicing
     segments_.clear();
     TrajectoryMsgToSegments(
         unary_joint_traj, 
+        index_permutation_,
         n_dof_, 
         rtt_now, 
         segments_);
@@ -600,9 +626,27 @@ void JointTrajGeneratorRML::updateHook()
       new_traj_start_time = joint_traj_cmd_.header.stamp - ros::Duration(rtt_rosclock::host_rt_offset_from_rtt());
     }
 
+    // Check if joint names are given
+    if(joint_traj_cmd_.joint_names.size() == n_dof_) {
+      // Permute the joint names properly
+      int joint_index=0;
+      for(std::vector<std::string>::const_iterator it = joint_traj_cmd_.joint_names.begin();
+          it != joint_traj_cmd_.joint_names.end();
+          ++it)
+      {
+        index_permutation_[joint_index] = joint_name_index_map_[*it];
+        joint_index++;
+      }
+    } else {
+      for(int joint_index=0; joint_index<n_dof_; joint_index++) {
+        index_permutation_[joint_index] = joint_index;
+      }
+    }
+
     // Convert the trajectory message to a list of segments for splicing
     TrajectoryMsgToSegments(
         joint_traj_cmd_, 
+        index_permutation_,
         n_dof_, 
         new_traj_start_time, 
         new_segments);
@@ -625,6 +669,10 @@ void JointTrajGeneratorRML::updateHook()
       // Send instantaneous joint position and velocity commands
       joint_position_out_.write(joint_position_sample_);
       joint_velocity_out_.write(joint_velocity_sample_);
+
+      // Compute error
+      joint_position_err_ = joint_position_sample_ - joint_position_;
+      joint_velocity_err_ = joint_velocity_sample_ - joint_velocity_;
       
       // Publish debug traj to ros
       if(ros_publish_throttle_.ready(0.02)) 
@@ -635,6 +683,26 @@ void JointTrajGeneratorRML::updateHook()
         std::copy(joint_position_sample_.data(), joint_position_sample_.data() + n_dof_, joint_state_desired_.position.begin());
         std::copy(joint_velocity_sample_.data(), joint_velocity_sample_.data() + n_dof_, joint_state_desired_.velocity.begin());
         joint_state_desired_out_.write(joint_state_desired_);
+
+        // Publish controller state
+        controller_state_.header = joint_state_desired_.header;
+        controller_state_.desired.positions.resize(n_dof_);
+        controller_state_.desired.velocities.resize(n_dof_);
+        controller_state_.actual.positions.resize(n_dof_);
+        controller_state_.actual.velocities.resize(n_dof_);
+        controller_state_.error.positions.resize(n_dof_);
+        controller_state_.error.velocities.resize(n_dof_);
+
+        std::copy(joint_position_sample_.data(), joint_position_sample_.data() + n_dof_, controller_state_.desired.positions.begin());
+        std::copy(joint_velocity_sample_.data(), joint_velocity_sample_.data() + n_dof_, controller_state_.desired.velocities.begin());
+        
+        std::copy(joint_position_.data(), joint_position_.data() + n_dof_, controller_state_.actual.positions.begin());
+        std::copy(joint_velocity_.data(), joint_velocity_.data() + n_dof_, controller_state_.actual.velocities.begin());
+
+        std::copy(joint_position_err_.data(), joint_position_err_.data() + n_dof_, controller_state_.error.positions.begin());
+        std::copy(joint_velocity_err_.data(), joint_velocity_err_.data() + n_dof_, controller_state_.error.velocities.begin());
+
+        controller_state_out_.write(controller_state_);
       }
     }
   } catch (std::runtime_error &err) {

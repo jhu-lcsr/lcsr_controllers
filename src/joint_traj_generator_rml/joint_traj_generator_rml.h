@@ -17,6 +17,7 @@
 #include <trajectory_msgs/JointTrajectory.h>
 #include <trajectory_msgs/JointTrajectoryPoint.h>
 #include <sensor_msgs/JointState.h>
+#include <control_msgs/JointTrajectoryControllerState.h>
 
 #include <rtt_ros_tools/throttles.h>
 
@@ -59,6 +60,7 @@ namespace lcsr_controllers {
     RTT::InputPort<trajectory_msgs::JointTrajectoryPoint> joint_traj_point_cmd_in_;
     RTT::InputPort<trajectory_msgs::JointTrajectory> joint_traj_cmd_in_;
     RTT::OutputPort<sensor_msgs::JointState> joint_state_desired_out_;
+    RTT::OutputPort<control_msgs::JointTrajectoryControllerState> controller_state_out_;
 
   public:
     JointTrajGeneratorRML(std::string const& name);
@@ -121,6 +123,7 @@ namespace lcsr_controllers {
     //! Convert a ROS trajectory message to a list of TrajSegments
     static bool TrajectoryMsgToSegments(
         const trajectory_msgs::JointTrajectory &msg,
+        const std::vector<size_t> &ip,
         const size_t n_dof,
         const ros::Time trajectory_start_time,
         TrajSegments &segments);
@@ -179,18 +182,22 @@ namespace lcsr_controllers {
     // Robot model
     std::vector<std::string> joint_names_;
     std::map<std::string,size_t> joint_name_index_map_;
+    std::vector<size_t> index_permutation_;
 
     // State
     Eigen::VectorXd
       joint_position_,
       joint_position_cmd_,
       joint_position_sample_,
+      joint_position_err_,
       joint_velocity_,
-      joint_velocity_sample_;
+      joint_velocity_sample_,
+      joint_velocity_err_;
 
     trajectory_msgs::JointTrajectoryPoint joint_traj_point_cmd_;
     trajectory_msgs::JointTrajectory joint_traj_cmd_;
     sensor_msgs::JointState joint_state_desired_;
+    control_msgs::JointTrajectoryControllerState controller_state_;
     rtt_ros_tools::PeriodicThrottle ros_publish_throttle_;
 
     // Conman interface

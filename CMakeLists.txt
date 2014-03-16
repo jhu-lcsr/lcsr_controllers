@@ -9,6 +9,7 @@ find_package(catkin REQUIRED
   rtt_ros_tools
   kdl_urdf_tools
   kdl_conversions
+  control_msgs
   control_toolbox
   reflexxes_type2)
 
