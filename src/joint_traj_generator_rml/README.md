@@ -41,4 +41,4 @@ For each point, if the `time_from_start` is zero, then the controller will consi
 
 ### JointTrajectoryAction (ROS only)
 
-***TBD***
+This component will advertise an actionlib interface on a topic named `COMPONENT_NAME/action` of time `control_msgs::FollowJointTrajectoryAction`. This can be used with any ROS actionlib interface, and it has the same semantics as publishing a `trajectory_msgs::JointTrajectory` message.
