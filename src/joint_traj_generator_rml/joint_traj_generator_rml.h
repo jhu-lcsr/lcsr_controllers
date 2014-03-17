@@ -64,7 +64,6 @@ namespace lcsr_controllers {
     RTT::InputPort<trajectory_msgs::JointTrajectoryPoint> joint_traj_point_cmd_in_;
     RTT::InputPort<trajectory_msgs::JointTrajectory> joint_traj_cmd_in_;
     RTT::OutputPort<sensor_msgs::JointState> joint_state_desired_out_;
-    RTT::OutputPort<control_msgs::JointTrajectoryControllerState> controller_state_out_;
 
   public:
     JointTrajGeneratorRML(std::string const& name);
@@ -182,24 +181,21 @@ namespace lcsr_controllers {
         const Eigen::VectorXd &point,
         const ros::Time &time,
         TrajSegments &segments,
-        std::vector<size_t> &index_permutation,
-        bool &recompute_trajectory) const;
+        std::vector<size_t> &index_permutation) const;
 
     //! Update a trajectory from a trajectory_msgs::JointTrajectoryPoint
     bool updateSegments(
         const trajectory_msgs::JointTrajectoryPoint &traj_point,
         const ros::Time &time,
         TrajSegments &segments,
-        std::vector<size_t> &index_permutation,
-        bool &recompute_trajectory) const;
+        std::vector<size_t> &index_permutation) const;
 
     //! Update a trajectory from a trajectory_msgs::JointTrajectory
     bool updateSegments(
         const trajectory_msgs::JointTrajectory &trajectory,
         const ros::Time &time,
         TrajSegments &segments,
-        std::vector<size_t> &index_permutation,
-        bool &recompute_trajectory) const;
+        std::vector<size_t> &index_permutation) const;
 
     //! Get an identity permutation f(x) = x
     void getIdentityIndexPermutation(
@@ -257,7 +253,6 @@ namespace lcsr_controllers {
     trajectory_msgs::JointTrajectoryPoint joint_traj_point_cmd_;
     trajectory_msgs::JointTrajectory joint_traj_cmd_;
     sensor_msgs::JointState joint_state_desired_;
-    control_msgs::JointTrajectoryControllerState controller_state_;
     rtt_ros_tools::PeriodicThrottle ros_publish_throttle_;
 
     // Conman interface
