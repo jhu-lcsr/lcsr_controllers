@@ -177,6 +177,31 @@ namespace lcsr_controllers {
 
   protected:
 
+    //! Update a trajectory from an Eigen::VectorXd
+    bool updateSegments(
+        const Eigen::VectorXd &point,
+        const ros::Time &time,
+        TrajSegments &segments,
+        std::vector<size_t> &index_permutation,
+        bool &recompute_trajectory) const;
+
+    //! Update a trajectory from a trajectory_msgs::JointTrajectoryPoint
+    bool updateSegments(
+        const trajectory_msgs::JointTrajectoryPoint &traj_point,
+        const ros::Time &time,
+        TrajSegments &segments,
+        std::vector<size_t> &index_permutation,
+        bool &recompute_trajectory) const;
+
+    //! Update a trajectory from a trajectory_msgs::JointTrajectory
+    bool updateSegments(
+        const trajectory_msgs::JointTrajectory &trajectory,
+        const ros::Time &time,
+        TrajSegments &segments,
+        std::vector<size_t> &index_permutation,
+        bool &recompute_trajectory) const;
+
+    //! Get an identity permutation f(x) = x
     void getIdentityIndexPermutation(
         std::vector<size_t> &index_permutation) const
     {
@@ -186,6 +211,7 @@ namespace lcsr_controllers {
       }
     }
 
+    //! Get an index permutation based on the joint names
     void getIndexPermutation(
         const std::vector<std::string> &joint_names,
         std::vector<size_t> &index_permutation) const
@@ -237,7 +263,6 @@ namespace lcsr_controllers {
     // Conman interface
     boost::shared_ptr<conman::Hook> conman_hook_;
 
-#if 0
   private:
 
     // Convenience typedefs for actionlib
@@ -261,7 +286,6 @@ namespace lcsr_controllers {
 
     //! Handle preemption here
     void cancelCallback(GoalHandle gh);
-#endif
   };
 }
 
