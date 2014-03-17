@@ -219,6 +219,7 @@ bool JointTrajGeneratorRML::configureRML(
 bool JointTrajGeneratorRML::startHook()
 {
   segments_.clear();
+  rtt_action_server_.start();
   return true;
 }
 
@@ -777,6 +778,7 @@ void JointTrajGeneratorRML::updateHook()
 
 void JointTrajGeneratorRML::stopHook()
 {
+  // TODO: rtt_action_server_.stop();
   // Clear data buffers (this will make them return OldData if nothing new is written to them)
   joint_position_in_.clear();
   joint_velocity_in_.clear();
@@ -822,6 +824,8 @@ void JointTrajGeneratorRML::RMLLog(
 
 void JointTrajGeneratorRML::goalCallback(JointTrajGeneratorRML::GoalHandle gh)
 {
+  RTT::log(RTT::Info) << "Recieved action goal." << RTT::endlog();
+
   // Always preempt the current goal and accept the new one
   if(current_gh_.isValid() && current_gh_.getGoalStatus().status == actionlib_msgs::GoalStatus::ACTIVE) {
     current_gh_.setCanceled();
@@ -831,6 +835,8 @@ void JointTrajGeneratorRML::goalCallback(JointTrajGeneratorRML::GoalHandle gh)
 
 void JointTrajGeneratorRML::cancelCallback(JointTrajGeneratorRML::GoalHandle gh)
 {
+  RTT::log(RTT::Info) << "Recieved action preemption." << RTT::endlog();
+
   if(current_gh_.isValid() && current_gh_ == gh) {
     current_gh_.setCanceled();
   }
