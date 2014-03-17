@@ -14,7 +14,8 @@ ROS and the Conman controller manager.
 ### Trajectory-Generators 
 
 * Joint Trajectory Generator
-  * KDL Trapezoidal Profile
+  * KDL Trapezoidal Profile `lcsr_controllers::JointTrajGeneratorKDL`
+  * Reflexxes Type-2 Interpolation [`lcsr_controllers::JointTrajGeneratorRML`](src/joint_traj_generator_rml/README.md)
 
 ### Trajectory Controllers
 
