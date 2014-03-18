@@ -642,10 +642,13 @@ void JointTrajGeneratorRML::updateHook()
   RTT::FlowStatus traj_status = joint_traj_cmd_in_.readNewest( joint_traj_cmd_ );
 
   // Do nothing and generate no output if there's no command
-  if(point_status == RTT::NoData && traj_status == RTT::NoData && traj_point_status == RTT::NoData)
+  if(point_status == RTT::NoData &&
+     traj_status == RTT::NoData && 
+     traj_point_status == RTT::NoData &&
+     !current_gh_.isValid())
   {
     return;
-  }
+  } 
 
   // Flag to force recomputation of the trajectory
   bool recompute_trajectory = false;
@@ -680,29 +683,54 @@ void JointTrajGeneratorRML::updateHook()
           current_gh_.setAccepted();
 
           // Update the trajectory
-          if(verbose_) RTT::log(RTT::Debug) << "New trajectory action goal." <<RTT::endlog();
+          RTT::log(RTT::Debug) << "New trajectory action goal." <<RTT::endlog();
           this->updateSegments(current_gh_.getGoal()->trajectory, rtt_now,
                                segments_, index_permutation_);
           break;
         }
-      case actionlib_msgs::GoalStatus::PREEMPTED:
+      case actionlib_msgs::GoalStatus::PREEMPTING:
         {
+          RTT::log(RTT::Debug) << "Trajectory action goal has been preempted." <<RTT::endlog();
           // Preempt the trajectory
           this->updateSegments(joint_position_, rtt_now,
                                segments_, index_permutation_);
+          current_gh_.setCanceled();
           break;
         }
       case actionlib_msgs::GoalStatus::ACTIVE:
         {
           if(segments_.size() == 1 && segments_.front().achieved) {
-            current_gh_.setSucceeded();
+            if((segments_.front().goal_positions - joint_position_).norm() < 0.05) { 
+              RTT::log(RTT::Debug) << "Trajectory action goal has succeeded." <<RTT::endlog();
+              current_gh_.setSucceeded();
+            } else {
+              RTT::log(RTT::Debug) << "Trajectory action goal has failed." <<RTT::endlog();
+              current_gh_.setAborted();
+              this->updateSegments(joint_position_, rtt_now,
+                                   segments_, index_permutation_);
+            }
           }
           break;
         }
+      case actionlib_msgs::GoalStatus::RECALLING:
+        current_gh_.setCanceled();
+        this->updateSegments(joint_position_, rtt_now,
+                             segments_, index_permutation_);
+        break;
+      case actionlib_msgs::GoalStatus::PREEMPTED:
+      case actionlib_msgs::GoalStatus::SUCCEEDED:
+      case actionlib_msgs::GoalStatus::ABORTED:
+      case actionlib_msgs::GoalStatus::REJECTED:
+      case actionlib_msgs::GoalStatus::RECALLED:
+        // replace the current goalhandle with an invalid one
+        // if we do this, we won't send any samples afterwards
+        //current_gh_ = GoalHandle();
+        break;
       default:
+        RTT::log(RTT::Warning) << "Trajectory action goal is in a bad state." <<RTT::endlog();
         break;
     };
-  }
+  } 
 
   // Sample the trajectory from segments_
   bool new_sample = false;
@@ -831,13 +859,10 @@ void JointTrajGeneratorRML::goalCallback(JointTrajGeneratorRML::GoalHandle gh)
     current_gh_.setCanceled();
   }
   current_gh_ = gh;
+  RTT::log(RTT::Info) << "Action goal status is:" << (int)current_gh_.getGoalStatus().status << RTT::endlog();
 }
 
 void JointTrajGeneratorRML::cancelCallback(JointTrajGeneratorRML::GoalHandle gh)
 {
   RTT::log(RTT::Info) << "Recieved action preemption." << RTT::endlog();
-
-  if(current_gh_.isValid() && current_gh_ == gh) {
-    current_gh_.setCanceled();
-  }
 }
