@@ -17,8 +17,13 @@
 #include <trajectory_msgs/JointTrajectory.h>
 #include <trajectory_msgs/JointTrajectoryPoint.h>
 #include <sensor_msgs/JointState.h>
+#include <control_msgs/JointTrajectoryControllerState.h>
+#include <control_msgs/FollowJointTrajectoryAction.h>
 
 #include <rtt_ros_tools/throttles.h>
+
+#include <rtt_actionlib/rtt_actionlib.h>
+#include <rtt_actionlib/rtt_action_server.h>
 
 #include <conman/hook.h>
 
@@ -121,6 +126,7 @@ namespace lcsr_controllers {
     //! Convert a ROS trajectory message to a list of TrajSegments
     static bool TrajectoryMsgToSegments(
         const trajectory_msgs::JointTrajectory &msg,
+        const std::vector<size_t> &ip,
         const size_t n_dof,
         const ros::Time trajectory_start_time,
         TrajSegments &segments);
@@ -170,6 +176,59 @@ namespace lcsr_controllers {
 
   protected:
 
+    //! Update a trajectory from an Eigen::VectorXd
+    bool updateSegments(
+        const Eigen::VectorXd &point,
+        const ros::Time &time,
+        TrajSegments &segments,
+        std::vector<size_t> &index_permutation) const;
+
+    //! Update a trajectory from a trajectory_msgs::JointTrajectoryPoint
+    bool updateSegments(
+        const trajectory_msgs::JointTrajectoryPoint &traj_point,
+        const ros::Time &time,
+        TrajSegments &segments,
+        std::vector<size_t> &index_permutation) const;
+
+    //! Update a trajectory from a trajectory_msgs::JointTrajectory
+    bool updateSegments(
+        const trajectory_msgs::JointTrajectory &trajectory,
+        const ros::Time &time,
+        TrajSegments &segments,
+        std::vector<size_t> &index_permutation) const;
+
+    //! Get an identity permutation f(x) = x
+    void getIdentityIndexPermutation(
+        std::vector<size_t> &index_permutation) const
+    {
+      index_permutation.resize(n_dof_);
+      for(int joint_index=0; joint_index<n_dof_; joint_index++) {
+        index_permutation[joint_index] = joint_index;
+      }
+    }
+
+    //! Get an index permutation based on the joint names
+    void getIndexPermutation(
+        const std::vector<std::string> &joint_names,
+        std::vector<size_t> &index_permutation) const
+    {
+      index_permutation.resize(n_dof_);
+      // Check if joint names are given
+      if(joint_names.size() == n_dof_) {
+        // Permute the joint names properly
+        int joint_index=0;
+        for(std::vector<std::string>::const_iterator it = joint_names.begin();
+            it != joint_names.end();
+            ++it)
+        {
+          index_permutation[joint_index] = joint_name_index_map_.find(*it)->second;
+          joint_index++;
+        }
+      } else {
+        this->getIdentityIndexPermutation(index_permutation);
+      }
+    }
+
     //! Trajectory Generator
     boost::shared_ptr<ReflexxesAPI> rml_;
     boost::shared_ptr<RMLPositionInputParameters> rml_in_;
@@ -179,14 +238,17 @@ namespace lcsr_controllers {
     // Robot model
     std::vector<std::string> joint_names_;
     std::map<std::string,size_t> joint_name_index_map_;
+    std::vector<size_t> index_permutation_;
 
     // State
     Eigen::VectorXd
       joint_position_,
       joint_position_cmd_,
       joint_position_sample_,
+      joint_position_err_,
       joint_velocity_,
-      joint_velocity_sample_;
+      joint_velocity_sample_,
+      joint_velocity_err_;
 
     trajectory_msgs::JointTrajectoryPoint joint_traj_point_cmd_;
     trajectory_msgs::JointTrajectory joint_traj_cmd_;
@@ -196,6 +258,29 @@ namespace lcsr_controllers {
     // Conman interface
     boost::shared_ptr<conman::Hook> conman_hook_;
 
+  private:
+
+    // Convenience typedefs for actionlib
+    ACTION_DEFINITION(control_msgs::FollowJointTrajectoryAction);
+    typedef actionlib::ServerGoalHandle<control_msgs::FollowJointTrajectoryAction> GoalHandle;
+
+    //! Current action goal
+    GoalHandle current_gh_;
+
+    //! Action feedback message
+    Feedback feedback_;
+    //! Action result message
+    Result result_;
+
+    //! RTT action server
+    rtt_actionlib::RTTActionServer<control_msgs::FollowJointTrajectoryAction> rtt_action_server_;
+
+    //! Accept/reject goal requests here
+    // This function will get called before calling updateHook() again
+    void goalCallback(GoalHandle gh);
+
+    //! Handle preemption here
+    void cancelCallback(GoalHandle gh);
   };
 }
 

@@ -71,6 +71,13 @@ JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
   this->ports()->addPort("joint_traj_cmd_in", joint_traj_cmd_in_);
   this->ports()->addPort("joint_state_desired_out", joint_state_desired_out_);
 
+  // Add action server ports to this task's root service
+  rtt_action_server_.addPorts(this->provides(), true, "~"+this->getName()+"/action/");
+
+  // Bind action server goal and cancel callbacks (see below)
+  rtt_action_server_.registerGoalCallback(boost::bind(&JointTrajGeneratorRML::goalCallback, this, _1));
+  rtt_action_server_.registerCancelCallback(boost::bind(&JointTrajGeneratorRML::cancelCallback, this, _1));
+
   // Load Conman interface
   conman_hook_ = conman::Hook::GetHook(this);
   conman_hook_->setInputExclusivity("joint_position_in", conman::Exclusivity::EXCLUSIVE);
@@ -115,6 +122,19 @@ bool JointTrajGeneratorRML::configureHook()
       RTT::log(RTT::Error) << "Could not initialize robot kinematics!" << RTT::endlog();
       return false;
     }
+
+    // Get joint names
+    joint_names_.clear();
+    joint_names_.reserve(n_dof_);
+    int j=0;
+    for(std::vector<KDL::Segment>::iterator it = kdl_chain.segments.begin();
+        it != kdl_chain.segments.end();
+        ++it)
+    {
+      joint_names_.push_back(it->getJoint().getName());
+      joint_name_index_map_[joint_names_.back()] = j;
+      j++;
+    }
   }
 
   // Require some number of joints
@@ -124,9 +144,8 @@ bool JointTrajGeneratorRML::configureHook()
   }
 
 
-  // Get individual joint properties from urdf and parameter server
-  joint_names_.resize(n_dof_);
 
+  // Get individual joint properties from urdf and parameter server
   position_tolerance_.conservativeResize(n_dof_);
   velocity_tolerance_.conservativeResize(n_dof_);
   max_velocities_.conservativeResize(n_dof_);
@@ -146,8 +165,12 @@ bool JointTrajGeneratorRML::configureHook()
   joint_position_.resize(n_dof_);
   joint_position_cmd_.resize(n_dof_);
   joint_position_sample_.resize(n_dof_);
+  joint_position_err_.resize(n_dof_);
   joint_velocity_.resize(n_dof_);
   joint_velocity_sample_.resize(n_dof_);
+  joint_velocity_err_.resize(n_dof_);
+
+  index_permutation_.resize(n_dof_);
 
   // Configure RML structures
   return this->configureRML(rml_, rml_in_, rml_out_, rml_flags_);
@@ -196,6 +219,7 @@ bool JointTrajGeneratorRML::configureRML(
 bool JointTrajGeneratorRML::startHook()
 {
   segments_.clear();
+  rtt_action_server_.start();
   return true;
 }
 
@@ -230,14 +254,13 @@ bool JointTrajGeneratorRML::SpliceTrajectory(
 
 bool JointTrajGeneratorRML::TrajectoryMsgToSegments(
     const trajectory_msgs::JointTrajectory &msg,
+    const std::vector<size_t> &ip,
     const size_t n_dof,
     const ros::Time new_traj_start_time,
     TrajSegments &segments)
 {
   // Clear the output segment list
   segments.clear();
-
-  // TODO: Permute the joint names properly
   
   // Make sure the traj isn't empty
   if(msg.points.size() == 0) {
@@ -280,10 +303,12 @@ bool JointTrajGeneratorRML::TrajectoryMsgToSegments(
     new_segment.goal_time = new_traj_start_time + it->time_from_start;
     new_segment.expected_time = new_segment.goal_time;
 
-    // Copy in the data
-    if(it->positions.size() == n_dof) std::copy(it->positions.begin(), it->positions.end(), new_segment.goal_positions.data());
-    if(it->velocities.size() == n_dof) std::copy(it->velocities.begin(), it->velocities.end(), new_segment.goal_velocities.data());
-    if(it->accelerations.size() == n_dof) std::copy(it->accelerations.begin(), it->accelerations.end(), new_segment.goal_accelerations.data());
+    // Copy in the data (permuted appropriately)
+    for(int j=0; j<n_dof; j++) {
+      if(j < it->positions.size()) new_segment.goal_positions(ip[j]) = it->positions[j];
+      if(j < it->velocities.size()) new_segment.goal_velocities(ip[j]) = it->velocities[j];
+      if(j < it->accelerations.size()) new_segment.goal_accelerations(ip[j]) = it->accelerations[j];
+    }
 
     segments.push_back(new_segment);
   }
@@ -508,6 +533,90 @@ bool JointTrajGeneratorRML::sampleTrajectory(
   return true;
 }
 
+bool JointTrajGeneratorRML::updateSegments(
+        const Eigen::VectorXd &point,
+        const ros::Time &time,
+        TrajSegments &segments,
+        std::vector<size_t> &index_permutation) const
+{
+  // Check the size of the jointspace command
+  if(point.size() == n_dof_) {
+    // Handle a position given as an Eigen vector
+    TrajSegment segment(n_dof_,true);
+
+    segment.start_time = time;
+    segment.goal_positions = point;
+    segments.clear();
+    segments.push_back(segment);
+  } else {
+    //TODO: Report warning
+    return false;
+  }
+
+  return true;
+}
+
+
+bool JointTrajGeneratorRML::updateSegments(
+        const trajectory_msgs::JointTrajectoryPoint &traj_point,
+        const ros::Time &time,
+        TrajSegments &segments,
+        std::vector<size_t> &index_permutation) const
+{
+
+  // Clear the segments
+  segments.clear();
+
+  // Create a unary trajectory
+  trajectory_msgs::JointTrajectory unary_joint_traj;
+  unary_joint_traj.header.stamp = time;
+  unary_joint_traj.points.push_back(traj_point);
+
+  this->updateSegments(unary_joint_traj, time, segments, index_permutation);
+
+  return true;
+}
+
+bool JointTrajGeneratorRML::updateSegments(
+        const trajectory_msgs::JointTrajectory &trajectory,
+        const ros::Time &time,
+        TrajSegments &segments,
+        std::vector<size_t> &index_permutation) const
+{
+  // Check if the traj is empty
+  if(trajectory.points.size() == 0) {
+    if(verbose_) RTT::log(RTT::Debug) << "Received empty trajectory, stopping arm." <<RTT::endlog();
+    this->updateSegments(joint_position_, time, segments, index_permutation);
+  } else {
+    // Create a new list of segments to be spliced in
+    TrajSegments new_segments;
+    // By default, set the start time to now
+    ros::Time new_traj_start_time = time;
+
+    // If the header stamp is non-zero, then determine which points we should pursue
+    if(!trajectory.header.stamp.isZero()) {
+      // Offset the NTP-corrected time to get the RTT-time
+      // Correct the timestamp so that its relative to the realtime clock
+      // TODO: make it so this can be disabled or make two different ports
+      new_traj_start_time = trajectory.header.stamp - ros::Duration(rtt_rosclock::host_rt_offset_from_rtt());
+    }
+
+    // Get the proper index permutation
+    this->getIndexPermutation(trajectory.joint_names, index_permutation);
+
+    // Convert the trajectory message to a list of segments for splicing
+    TrajectoryMsgToSegments(
+        trajectory, 
+        index_permutation,
+        n_dof_, 
+        new_traj_start_time, 
+        new_segments);
+
+    // Update the trajectory
+    SpliceTrajectory(segments, new_segments);
+  }
+}
+
 void JointTrajGeneratorRML::updateHook()
 {
   // Get the current and the time since the last update
@@ -533,10 +642,13 @@ void JointTrajGeneratorRML::updateHook()
   RTT::FlowStatus traj_status = joint_traj_cmd_in_.readNewest( joint_traj_cmd_ );
 
   // Do nothing and generate no output if there's no command
-  if(point_status == RTT::NoData && traj_status == RTT::NoData && traj_point_status == RTT::NoData)
+  if(point_status == RTT::NoData &&
+     traj_status == RTT::NoData && 
+     traj_point_status == RTT::NoData &&
+     !current_gh_.isValid())
   {
     return;
-  }
+  } 
 
   // Flag to force recomputation of the trajectory
   bool recompute_trajectory = false;
@@ -545,106 +657,156 @@ void JointTrajGeneratorRML::updateHook()
   if(point_status == RTT::NewData) 
   {
     if(verbose_) RTT::log(RTT::Debug) << "New point." <<RTT::endlog();
-
-    // Check the size of the jointspace command
-    if(joint_position_cmd_.size() == n_dof_) {
-      // Handle a position given as an Eigen vector
-      TrajSegment segment(n_dof_,true);
-
-      segment.start_time = rtt_now;
-      segment.goal_positions = joint_position_;
-      segments_.clear();
-      segments_.push_back(segment);
-
-      // Set the recompute flag
-      recompute_trajectory = true;
-    } else {
-      //TODO: Report warning
-    }
+    this->updateSegments(joint_position_cmd_, rtt_now, segments_,
+                         index_permutation_);
   } 
   // Check if there's a new desired trajectory point
   else if(traj_point_status == RTT::NewData) 
   {
     if(verbose_) RTT::log(RTT::Debug) << "New trajectory point." <<RTT::endlog();
-
-    // Create a unary trajectory
-    trajectory_msgs::JointTrajectory unary_joint_traj;
-    unary_joint_traj.points.push_back(joint_traj_point_cmd_);
-
-    // Convert the trajectory message to a list of segments for splicing
-    segments_.clear();
-    TrajectoryMsgToSegments(
-        unary_joint_traj, 
-        n_dof_, 
-        rtt_now, 
-        segments_);
-    
-    // Set the recompute flag
-    recompute_trajectory = true;
+    this->updateSegments(joint_traj_point_cmd_, rtt_now, segments_,
+                         index_permutation_);
   }
   // Check if there's a new desired trajectory
   else if(traj_status == RTT::NewData) 
   {
-    if(verbose_) RTT::log(RTT::Debug) << "New trajectory." <<RTT::endlog();
-
-    // Create a new list of segments to be spliced in
-    TrajSegments new_segments;
-    // By default, set the start time to now
-    ros::Time new_traj_start_time = rtt_now;
-
-    // If the header stamp is non-zero, then determine which points we should pursue
-    if(!joint_traj_cmd_.header.stamp.isZero()) {
-      // Offset the NTP-corrected time to get the RTT-time
-      // Correct the timestamp so that its relative to the realtime clock
-      // TODO: make it so this can be disabled or make two different ports
-      new_traj_start_time = joint_traj_cmd_.header.stamp - ros::Duration(rtt_rosclock::host_rt_offset_from_rtt());
-    }
-
-    // Convert the trajectory message to a list of segments for splicing
-    TrajectoryMsgToSegments(
-        joint_traj_cmd_, 
-        n_dof_, 
-        new_traj_start_time, 
-        new_segments);
-    
-    // Update the trajectory
-    SpliceTrajectory(segments_, new_segments);
+    if(verbose_) RTT::log(RTT::Debug) << "New trajectory message." <<RTT::endlog();
+    this->updateSegments(joint_traj_cmd_, rtt_now, segments_,
+                         index_permutation_);
   }
+  // Check if there's a new action goal
+  else if(current_gh_.isValid()) {
+    switch(current_gh_.getGoalStatus().status) {
+      case actionlib_msgs::GoalStatus::PENDING:
+        {
+          // Accept the goal
+          current_gh_.setAccepted();
+
+          // Update the trajectory
+          RTT::log(RTT::Debug) << "New trajectory action goal." <<RTT::endlog();
+          this->updateSegments(current_gh_.getGoal()->trajectory, rtt_now,
+                               segments_, index_permutation_);
+          break;
+        }
+      case actionlib_msgs::GoalStatus::PREEMPTING:
+        {
+          RTT::log(RTT::Debug) << "Trajectory action goal has been preempted." <<RTT::endlog();
+          // Preempt the trajectory
+          this->updateSegments(joint_position_, rtt_now,
+                               segments_, index_permutation_);
+          current_gh_.setCanceled();
+          break;
+        }
+      case actionlib_msgs::GoalStatus::ACTIVE:
+        {
+          if(segments_.size() == 1 && segments_.front().achieved) {
+            if((segments_.front().goal_positions - joint_position_).norm() < 0.05) { 
+              RTT::log(RTT::Debug) << "Trajectory action goal has succeeded." <<RTT::endlog();
+              current_gh_.setSucceeded();
+            } else {
+              RTT::log(RTT::Debug) << "Trajectory action goal has failed." <<RTT::endlog();
+              current_gh_.setAborted();
+              this->updateSegments(joint_position_, rtt_now,
+                                   segments_, index_permutation_);
+            }
+          }
+          break;
+        }
+      case actionlib_msgs::GoalStatus::RECALLING:
+        current_gh_.setCanceled();
+        this->updateSegments(joint_position_, rtt_now,
+                             segments_, index_permutation_);
+        break;
+      case actionlib_msgs::GoalStatus::PREEMPTED:
+      case actionlib_msgs::GoalStatus::SUCCEEDED:
+      case actionlib_msgs::GoalStatus::ABORTED:
+      case actionlib_msgs::GoalStatus::REJECTED:
+      case actionlib_msgs::GoalStatus::RECALLED:
+        // replace the current goalhandle with an invalid one
+        // if we do this, we won't send any samples afterwards
+        //current_gh_ = GoalHandle();
+        break;
+      default:
+        RTT::log(RTT::Warning) << "Trajectory action goal is in a bad state." <<RTT::endlog();
+        break;
+    };
+  } 
 
   // Sample the trajectory from segments_
-  try { 
-    bool new_sample = 
-      this->sampleTrajectory(
-          rtt_now,
-          joint_position_, joint_velocity_,
-          rml_, rml_in_, rml_out_, rml_flags_,
-          segments_,
-          joint_position_sample_, joint_velocity_sample_);
+  bool new_sample = false;
 
-    if(new_sample) {
-      // Send instantaneous joint position and velocity commands
-      joint_position_out_.write(joint_position_sample_);
-      joint_velocity_out_.write(joint_velocity_sample_);
-      
-      // Publish debug traj to ros
-      if(ros_publish_throttle_.ready(0.02)) 
-      {
-        joint_state_desired_.header.stamp = rtt_rosclock::host_rt_now();
-        joint_state_desired_.position.resize(n_dof_);
-        joint_state_desired_.velocity.resize(n_dof_);
-        std::copy(joint_position_sample_.data(), joint_position_sample_.data() + n_dof_, joint_state_desired_.position.begin());
-        std::copy(joint_velocity_sample_.data(), joint_velocity_sample_.data() + n_dof_, joint_state_desired_.velocity.begin());
-        joint_state_desired_out_.write(joint_state_desired_);
-      }
-    }
+  try { 
+    new_sample = this->sampleTrajectory(
+        rtt_now,
+        joint_position_, joint_velocity_,
+        rml_, rml_in_, rml_out_, rml_flags_,
+        segments_,
+        joint_position_sample_, joint_velocity_sample_);
+
   } catch (std::runtime_error &err) {
+
+    // Abort a goal if it exists
+    if(current_gh_.isValid() && current_gh_.getGoalStatus().status == actionlib_msgs::GoalStatus::ACTIVE) {
+      current_gh_.setAborted();
+    }
+
     this->error();
     return;
+  }
+
+  // Write data ports if there was a new sample
+  if(new_sample)
+  {
+    // Send instantaneous joint position and velocity commands
+    joint_position_out_.write(joint_position_sample_);
+    joint_velocity_out_.write(joint_velocity_sample_);
+
+    // Compute error
+    joint_position_err_ = joint_position_sample_ - joint_position_;
+    joint_velocity_err_ = joint_velocity_sample_ - joint_velocity_;
+
+    // Publish debug traj to ros
+    if(ros_publish_throttle_.ready(0.02)) 
+    {
+      // Publish controller desired state
+      joint_state_desired_.header.stamp = rtt_rosclock::host_rt_now();
+      joint_state_desired_.position.resize(n_dof_);
+      joint_state_desired_.velocity.resize(n_dof_);
+      std::copy(joint_position_sample_.data(), joint_position_sample_.data() + n_dof_, joint_state_desired_.position.begin());
+      std::copy(joint_velocity_sample_.data(), joint_velocity_sample_.data() + n_dof_, joint_state_desired_.velocity.begin());
+      joint_state_desired_out_.write(joint_state_desired_);
+
+      // Publish action feedback
+      if(current_gh_.isValid() && current_gh_.getGoalStatus().status == actionlib_msgs::GoalStatus::ACTIVE) {
+        feedback_.header = joint_state_desired_.header;
+
+        feedback_.joint_names = joint_names_;
+
+        feedback_.desired.positions.resize(n_dof_);
+        feedback_.desired.velocities.resize(n_dof_);
+        feedback_.actual.positions.resize(n_dof_);
+        feedback_.actual.velocities.resize(n_dof_);
+        feedback_.error.positions.resize(n_dof_);
+        feedback_.error.velocities.resize(n_dof_);
+
+        std::copy(joint_position_sample_.data(), joint_position_sample_.data() + n_dof_, feedback_.desired.positions.begin());
+        std::copy(joint_velocity_sample_.data(), joint_velocity_sample_.data() + n_dof_, feedback_.desired.velocities.begin());
+
+        std::copy(joint_position_.data(), joint_position_.data() + n_dof_, feedback_.actual.positions.begin());
+        std::copy(joint_velocity_.data(), joint_velocity_.data() + n_dof_, feedback_.actual.velocities.begin());
+
+        std::copy(joint_position_err_.data(), joint_position_err_.data() + n_dof_, feedback_.error.positions.begin());
+        std::copy(joint_velocity_err_.data(), joint_velocity_err_.data() + n_dof_, feedback_.error.velocities.begin());
+
+        current_gh_.publishFeedback(feedback_);
+      }
+    }
   }
 }
 
 void JointTrajGeneratorRML::stopHook()
 {
+  // TODO: rtt_action_server_.stop();
   // Clear data buffers (this will make them return OldData if nothing new is written to them)
   joint_position_in_.clear();
   joint_velocity_in_.clear();
@@ -688,3 +850,19 @@ void JointTrajGeneratorRML::RMLLog(
   RTT::log(level) << " - AlternativeTargetVelocityVector: "<<*(rml_in->AlternativeTargetVelocityVector) << RTT::endlog();
 }
 
+void JointTrajGeneratorRML::goalCallback(JointTrajGeneratorRML::GoalHandle gh)
+{
+  RTT::log(RTT::Info) << "Recieved action goal." << RTT::endlog();
+
+  // Always preempt the current goal and accept the new one
+  if(current_gh_.isValid() && current_gh_.getGoalStatus().status == actionlib_msgs::GoalStatus::ACTIVE) {
+    current_gh_.setCanceled();
+  }
+  current_gh_ = gh;
+  RTT::log(RTT::Info) << "Action goal status is:" << (int)current_gh_.getGoalStatus().status << RTT::endlog();
+}
+
+void JointTrajGeneratorRML::cancelCallback(JointTrajGeneratorRML::GoalHandle gh)
+{
+  RTT::log(RTT::Info) << "Recieved action preemption." << RTT::endlog();
+}

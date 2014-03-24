@@ -15,11 +15,14 @@
   <build_depend>orocos_kdl</build_depend>
   <build_depend>eigen</build_depend>
 
+  <build_depend>conman</build_depend>
   <build_depend>rtt_ros</build_depend>
   <build_depend>rtt_rosclock</build_depend>
   <build_depend>rtt_rosparam</build_depend>
+  <build_depend>rtt_actionlib</build_depend>
   <build_depend>rtt_ros_tools</build_depend>
   <build_depend>rtt_sensor_msgs</build_depend>
+  <build_depend>rtt_control_msgs</build_depend>
   <build_depend>rtt_visualization_msgs</build_depend>
   <build_depend>kdl_typekit</build_depend>
   <build_depend>kdl_parser</build_depend>
@@ -31,6 +34,7 @@
   <run_depend>rtt</run_depend>
   <run_depend>ocl</run_depend>
   <run_depend>orocos_kdl</run_depend>
+  <run_depend>conman</run_depend>
 
   <run_depend>rtt_ros</run_depend>
   <run_depend>rtt_rosclock</run_depend>
@@ -50,8 +54,10 @@
       <plugin_depend>rtt_sensor_msgs</plugin_depend>
       <plugin_depend>rtt_trajectory_msgs</plugin_depend>
       <plugin_depend>rtt_visualization_msgs</plugin_depend>
+      <plugin_depend>rtt_control_msgs</plugin_depend>
       <plugin_depend>rtt_rosparam</plugin_depend>
       <plugin_depend>rtt_roscomm</plugin_depend>
+      <plugin_depend>rtt_actionlib</plugin_depend>
     </rtt_ros>
   </export>
 </package>

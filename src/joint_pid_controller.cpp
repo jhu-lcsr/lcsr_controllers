@@ -13,6 +13,8 @@
 #include <kdl_urdf_tools/tools.h>
 #include "joint_pid_controller.h"
 
+#include <rtt_rosclock/rtt_rosclock.h>
+
 using namespace lcsr_controllers;
 
 JointPIDController::JointPIDController(std::string const& name) :
@@ -127,11 +129,16 @@ bool JointPIDController::startHook()
 
 void JointPIDController::updateHook()
 {
-
+  static ros::Time last_time = rtt_rosclock::rtt_now();
+  const ros::Time time = rtt_rosclock::rtt_now();
+  const RTT::Seconds period = (time - last_time).toSec();
+  last_time = time;
   // Get the current and the time since the last update
-  const RTT::Seconds 
-    time = conman_hook_->getTime(), 
-    period = conman_hook_->getPeriod();
+  /*
+   *const RTT::Seconds 
+   *  time = conman_hook_->getTime(), 
+   *  period = conman_hook_->getPeriod();
+   */
 
   // Read in the current joint positions & velocities
   RTT::FlowStatus 
