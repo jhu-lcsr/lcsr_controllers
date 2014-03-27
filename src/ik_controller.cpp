@@ -9,6 +9,8 @@
 #include <kdl_parser/kdl_parser.hpp>
 
 #include <rtt_rosparam/rosparam.h>
+#include <rtt_rosclock/rtt_rosclock.h>
+#include <rtt_roscomm/rtt_rostopic.h>
 
 #include <tf_conversions/tf_kdl.h>
 
@@ -35,6 +37,7 @@ IKController::IKController(std::string const& name) :
   ,torques_()
   ,kp_(7,0.0)
   ,kd_(7,0.0)
+  ,ros_publish_throttle_(0.02)
 {
   // Declare properties
   this->addProperty("robot_description",robot_description_)
@@ -68,8 +71,7 @@ IKController::IKController(std::string const& name) :
   this->ports()->addPort("trajectories_debug_out", trajectories_debug_out_);
   trajectories_debug_out_.createStream(rtt_roscomm::topic("~/"+this->getName()+"/trajectories"));
 
-  //this->ports()->addPort("torques_debug_out", torques_debug_out_);
-  //torques_debug_out_.createStream(rtt_roscomm::topicBuffer("~/"+this->getName()+"/torques",32));
+  this->ports()->addPort("joint_state_desired_out", joint_state_desired_out_);
 }
 
 bool IKController::configureHook()
@@ -93,6 +95,13 @@ bool IKController::configureHook()
     return false;
   }
 
+  // ROS topics
+  if(!joint_state_desired_out_.createStream(rtt_roscomm::topic("~" + this->getName() + "/joint_state_desired")))
+  {
+    RTT::log(RTT::Error) << "ROS Topics could not be streamed..." <<RTT::endlog();
+    return false;
+  }
+
   RTT::log(RTT::Debug) << "Initializing kinematic and dynamic parameters from \"" << root_link_ << "\" to \"" << tip_link_ <<"\"" << RTT::endlog();
 
   // Initialize kinematics (KDL tree, KDL chain, and #DOF)
@@ -107,6 +116,16 @@ bool IKController::configureHook()
 
   if(kp_.size() < n_dof_ || kd_.size() < n_dof_) {
     RTT::log(RTT::Error) << "Not enough gains!" << RTT::endlog();
+  }
+
+  // Get joint names
+  joint_state_desired_.name.clear();
+  joint_state_desired_.name.reserve(n_dof_);
+  for(std::vector<KDL::Segment>::iterator it = kdl_chain_.segments.begin();
+      it != kdl_chain_.segments.end();
+      ++it)
+  {
+    joint_state_desired_.name.push_back(it->getJoint().getName());
   }
 
   // Resize working variables
@@ -141,7 +160,7 @@ bool IKController::configureHook()
   }
 
   trajectory_msgs::JointTrajectoryPoint single_point;
-  single_point.time_from_start = ros::Duration(0.005);
+  single_point.time_from_start = ros::Duration(0.0);
   single_point.positions.resize(n_dof_);
   single_point.velocities.resize(n_dof_);
   std::fill(single_point.positions.begin(),single_point.positions.end(),0.0);
@@ -153,19 +172,30 @@ bool IKController::configureHook()
   kdl_fk_solver_pos_.reset(
       new KDL::ChainFkSolverPos_recursive(kdl_chain_));
   kdl_ik_solver_vel_.reset(
-      new KDL::ChainIkSolverVel_pinv(
+      new KDL::ChainIkSolverVel_wdls(
         kdl_chain_,
         1.0E-6,
         150));
+#ifdef USE_NR_JL
   kdl_ik_solver_top_.reset(
-      new KDL::ChainIkSolverPos_NR(
+      new KDL::ChainIkSolverPos_NR_JL(
         kdl_chain_,
-        //joint_limits_min_,
-        //joint_limits_max_,
+        joint_limits_min_,
+        joint_limits_max_,
         *kdl_fk_solver_pos_,
         *kdl_ik_solver_vel_,
         250,
         1.0E-6));
+#endif
+
+#if 1
+  kdl_ik_solver_top_.reset(
+      new KDL::ChainIkSolverPos_LMA(
+        kdl_chain_,
+        1E-5,
+        500,
+        1E-15));
+#endif
 
   // Zero out torque data
   torques_.data.setZero();
@@ -206,7 +236,9 @@ void IKController::compute_ik(bool debug)
 
   kdl_ik_solver_top_->CartToJnt(ik_hint, tip_frame_des_, positions_des_.q);
 
-  RTT::log(RTT::Debug)<<"Unwrapped angles: "<<(positions_des_.q.data.transpose)()<<RTT::endlog();
+  if(debug) {
+    RTT::log(RTT::Debug)<<"Unwrapped angles: "<<(positions_des_.q.data.transpose)()<<RTT::endlog();
+  }
 
   // Unwrap angles
   for(unsigned int i=0; i<n_dof_; i++) {
@@ -217,7 +249,9 @@ void IKController::compute_ik(bool debug)
     }
   }
 
-  RTT::log(RTT::Debug)<<"Wrapped angles: "<<(positions_des_.q.data.transpose())<<RTT::endlog();
+  if(debug) {
+    RTT::log(RTT::Debug)<<"Wrapped angles: "<<(positions_des_.q.data.transpose())<<RTT::endlog();
+  }
 
   // Servo in jointspace to the appropriate joint coordinates
   for(unsigned int i=0; i<n_dof_; i++) {
@@ -251,9 +285,15 @@ void IKController::updateHook()
   // Compute the inverse kinematics solution
   this->compute_ik(false);
 
+  // Send position target
+  positions_out_port_.write( positions_des_.q.data );
+
+  // Publish debug traj to ros
+  if(ros_publish_throttle_.ready(0.02)) 
+  {
   // Send traj target
   if(trajectories_out_port_.connected()) {
-    trajectory_.header.stamp = ros::Time(0,0);//rtt_ros_tools::ros_rt_now() + ros::Duration(1.0);
+    trajectory_.header.stamp = ros::Time(0,0);
 
     for(size_t i=0; i<n_dof_; i++) {
       trajectory_.points[0].positions[i] = positions_des_.q(i);
@@ -263,11 +303,15 @@ void IKController::updateHook()
     trajectories_out_port_.write( trajectory_ );
   }
 
-  // Send position target
-  positions_out_port_.write( positions_des_.q.data );
 
-  // Send joint torques
-  torques_out_port_.write( torques_.data );
+    // Publish controller desired state
+    joint_state_desired_.header.stamp = rtt_rosclock::host_rt_now();
+    joint_state_desired_.position.resize(n_dof_);
+    joint_state_desired_.velocity.resize(n_dof_);
+    std::copy(positions_des_.q.data.data(), positions_des_.q.data.data() + n_dof_, joint_state_desired_.position.begin());
+    std::copy(positions_des_.qdot.data.data(), positions_des_.qdot.data.data() + n_dof_, joint_state_desired_.velocity.begin());
+    joint_state_desired_out_.write(joint_state_desired_);
+  }
 }
 
 void IKController::stopHook()

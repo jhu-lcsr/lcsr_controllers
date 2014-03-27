@@ -594,7 +594,9 @@ bool JointTrajGeneratorRML::updateSegments(
     ros::Time new_traj_start_time = time;
 
     // If the header stamp is non-zero, then determine which points we should pursue
-    if(!trajectory.header.stamp.isZero()) {
+    if(trajectory.header.stamp.isZero()) {
+      segments.clear();
+    } else {
       // Offset the NTP-corrected time to get the RTT-time
       // Correct the timestamp so that its relative to the realtime clock
       // TODO: make it so this can be disabled or make two different ports

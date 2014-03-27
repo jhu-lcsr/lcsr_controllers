@@ -17,6 +17,7 @@
 #include <kdl/chainfksolverpos_recursive.hpp>
 #include <kdl/chainiksolverpos_nr.hpp>
 #include <kdl/chainiksolverpos_nr_jl.hpp>
+#include <kdl/chainiksolverpos_lma.hpp>
 #include <kdl/chainiksolvervel_wdls.hpp>
 #include <kdl/chainiksolvervel_pinv.hpp>
 #include <kdl/chainiksolvervel_pinv_nso.hpp>
@@ -28,6 +29,7 @@
 //#include <geometry_msgs/WrenchStamped.h>
 #include <trajectory_msgs/JointTrajectory.h>
 #include <geometry_msgs/TransformStamped.h>
+#include <sensor_msgs/JointState.h>
 
 #include <visualization_msgs/Marker.h>
 
@@ -48,6 +50,7 @@ namespace lcsr_controllers {
     RTT::OutputPort<Eigen::VectorXd> positions_out_port_;
     RTT::OutputPort<Eigen::VectorXd> torques_out_port_;
     RTT::OutputPort<trajectory_msgs::JointTrajectory> trajectories_out_port_;
+    RTT::OutputPort<sensor_msgs::JointState> joint_state_desired_out_;
 
     // RTT Debug Ports
     RTT::OutputPort<Eigen::VectorXd> torques_debug_out_;
@@ -97,6 +100,9 @@ namespace lcsr_controllers {
     KDL::Frame tip_frame_des_;
 
     trajectory_msgs::JointTrajectory trajectory_;
+    sensor_msgs::JointState joint_state_desired_;
+
+    rtt_ros_tools::PeriodicThrottle ros_publish_throttle_;
   };
 }
 
