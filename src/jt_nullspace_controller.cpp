@@ -14,6 +14,8 @@
 
 #include <rtt_rosparam/rosparam.h>
 
+#include <rtt_tf/tf_interface.h>
+
 #include <rtt_ros_tools/tools.h>
 #include <rtt_roscomm/rtt_rostopic.h>
 #include <rtt_rosclock/rtt_rosclock.h>
@@ -29,9 +31,12 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   ,robot_description_("")
   ,root_link_("")
   ,tip_link_("")
+  ,target_frame_("")
   // Working variables
   ,n_dof_(0)
   // Params
+  ,limit_avoidance_gain_(0.0)
+  ,singularity_avoidance_gain_(0.0)
   ,linear_p_gain_(0.0)
   ,linear_d_gain_(0.0)
   ,linear_effort_threshold_(0.0)
@@ -55,6 +60,7 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   ,angular_position_within_tolerance_(false)
   ,angular_effort_within_tolerance_(false)
   ,within_tolerance_(false)
+  ,tf_(this)
 {
   // Declare properties
   this->addProperty("robot_description",robot_description_)
@@ -63,7 +69,12 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
     .doc("The root link for the controller. Cartesian pose commands are given in this frame.");
   this->addProperty("tip_link",tip_link_)
     .doc("The tip link for the controller. Cartesian pose commands are applied to this frame.");
+  this->addProperty("target_frame",target_frame_)
+    .doc("The name of the target TF frame if tf is to be used. Leave blank to disable this.");
 
+  this->addProperty("manipulability",manipulability_);
+  this->addProperty("singularity_avoidance_gain",singularity_avoidance_gain_);
+  this->addProperty("limit_avoidance_gain",limit_avoidance_gain_);
   this->addProperty("linear_p_gain",linear_p_gain_);
   this->addProperty("linear_d_gain",linear_d_gain_);
   this->addProperty("linear_position_threshold",linear_position_threshold_);
@@ -116,6 +127,9 @@ bool JTNullspaceController::configureHook()
   // Get private parameters
   rosparam->getComponentPrivate("root_link");
   rosparam->getComponentPrivate("tip_link");
+  rosparam->getComponentPrivate("target_frame");
+  rosparam->getComponentPrivate("singularity_avoidance_gain");
+  rosparam->getComponentPrivate("limit_avoidance_gain");
   rosparam->getComponentPrivate("linear_p_gain");
   rosparam->getComponentPrivate("linear_d_gain");
   rosparam->getComponentPrivate("linear_effort_threshold");
@@ -126,6 +140,11 @@ bool JTNullspaceController::configureHook()
   rosparam->getComponentPrivate("angular_position_threshold");
 
   rosparam->getComponentPrivate("joint_d_gains");
+
+  if(!tf_.ready()) {
+    RTT::log(RTT::Error) << this->getName() << " controller is not connected to tf!" << RTT::endlog(); 
+    return false;
+  }
 
   RTT::log(RTT::Debug) << "Initializing kinematic parameters from \"" << root_link_ << "\" to \"" << tip_link_ <<"\"" << RTT::endlog();
 
@@ -194,6 +213,7 @@ void JTNullspaceController::updateHook()
     // Read the command
     RTT::FlowStatus ros_status = pose_desired_in_.readNewest(pose_msg_);
     RTT::FlowStatus rtt_status = pose_twist_in_.readNewest(framevel_desired_);
+
     if(ros_status == RTT::NewData) {
       KDL::Frame frame;
       tf::poseMsgToKDL(pose_msg_.pose, frame);
@@ -202,6 +222,20 @@ void JTNullspaceController::updateHook()
       framevel_desired_.p.p = frame.p;
       framevel_desired_.p.v = KDL::Vector::Zero();
     } 
+    else if(target_frame_.length() > 0) {
+      if(tf_.canTransform(root_link_,target_frame_)) {
+        geometry_msgs::TransformStamped tform_msg = tf_.lookupTransform(root_link_,target_frame_);
+        KDL::Frame frame;
+        tf::transformMsgToKDL(tform_msg.transform, frame);
+        framevel_desired_.M.R = frame.M;
+        framevel_desired_.M.w = KDL::Vector::Zero();
+        framevel_desired_.p.p = frame.p;
+        framevel_desired_.p.v = KDL::Vector::Zero();
+      } else {
+        RTT::log(RTT::Warning) << "Could not get the transform from "<<root_link_<<" to "<<target_frame_<<"."<<RTT::endlog();
+        return;
+      }
+    }
     else if(rtt_status == RTT::NoData && ros_status == RTT::NoData) 
     {
       return;
@@ -210,18 +244,24 @@ void JTNullspaceController::updateHook()
     // Compute forward kinematics of current pose
     // framevel_ is in the base_link coordinate frame
     fk_solver_vel_->JntToCart(posvel_, framevel_);
+
     // Compute the cartesian position and velocity error
-    // framevel_err_ is the transform from the current to the desired pose in the frame of the base link
-    framevel_err_ = framevel_.Inverse() * framevel_desired_;
+    KDL::Frame frame = framevel_.GetFrame();
+    KDL::Frame frame_des = framevel_desired_.GetFrame();
+    KDL::Twist frame_err = KDL::diff(frame, frame_des);
+
+    KDL::Twist twist = framevel_.GetTwist();
+    KDL::Twist twist_des = framevel_desired_.GetTwist();
+    KDL::Twist twist_err = KDL::diff(twist, twist_des);
 
     // Rotation error
-    Eigen::Vector3d r_err = Eigen::Map<Eigen::Vector3d>(framevel_err_.M.R.GetRot().data);
+    Eigen::Vector3d r_err = Eigen::Map<Eigen::Vector3d>(frame_err.rot.data);
     // Angular velocity error
-    Eigen::Vector3d w_err = Eigen::Map<Eigen::Vector3d>(framevel_err_.M.w.data);
+    Eigen::Vector3d w_err = Eigen::Map<Eigen::Vector3d>(twist_err.rot.data);
     // Position error
-    Eigen::Vector3d p_err = Eigen::Map<Eigen::Vector3d>(framevel_err_.p.p.data);
+    Eigen::Vector3d p_err = Eigen::Map<Eigen::Vector3d>(frame_err.vel.data);
     // Velocity error
-    Eigen::Vector3d v_err = Eigen::Map<Eigen::Vector3d>(framevel_err_.p.v.data);
+    Eigen::Vector3d v_err = Eigen::Map<Eigen::Vector3d>(twist_err.vel.data);
 
     // Check pos/vel tolerances
     linear_position_err_norm_ = p_err.norm();
@@ -235,6 +275,7 @@ void JTNullspaceController::updateHook()
     wrench_.segment<3>(3) = angular_p_gain_*r_err + angular_d_gain_*w_err;
 
     // Handy typedefs
+    typedef Eigen::Matrix<double, 6, 6> Matrix6d;
     typedef Eigen::Matrix<double, 6, Eigen::Dynamic> Matrix6Jd;
     typedef Eigen::Matrix<double, Eigen::Dynamic, 6> MatrixJ6d;
     typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> MatrixJJd;
@@ -248,33 +289,80 @@ void JTNullspaceController::updateHook()
     Matrix6Jd J = jacobian_.data;
     MatrixJ6d J_t = J.transpose();
 
-    // Compute joint-space inertia matrix
-    if(chain_dynamics_->JntToMass(positions_, joint_inertia_) != 0) {
-      RTT::log(RTT::Error) << "Could not compute joint space inertia." << RTT::endlog();
-      this->error();
-      return;
-    }
-    Eigen::MatrixXd H = joint_inertia_.data;
-    Eigen::MatrixXd H_inv = H.inverse();
-
-    // Compute dynamically-consistent pseudoinverse
-    MatrixJ6d J_pinv = H_inv * J_t * ( J * H_inv * J_t ).inverse();
-
-    // Compute nullspace projector
-    MatrixJJd eye(n_dof_,n_dof_);
-    eye = Eigen::MatrixXd::Identity(n_dof_,n_dof_);
-    MatrixJJd JpJ = (J_pinv * J);
-    MatrixJJd N = eye - JpJ;
-    MatrixJJd N_t = N.transpose();
-
-    // Compute nullspace effort (to be projected)
-    // TODO: Do something smart(er) here
-    joint_effort_null_ = -1.0 * (joint_d_gains_.array() * joint_velocity_.array()).matrix();
-
+    // Compute the primary effort
     joint_effort_raw_ = J_t*wrench_;
 
+    {
+      // Compute nullspace effort (to be projected)
+      joint_effort_null_.setZero();
+
+      // Compute joint-space inertia matrix
+      if(chain_dynamics_->JntToMass(positions_, joint_inertia_) != 0) {
+        RTT::log(RTT::Error) << "Could not compute joint space inertia." << RTT::endlog();
+        this->error();
+        return;
+      }
+      Eigen::MatrixXd H = joint_inertia_.data;
+      Eigen::MatrixXd H_inv = H.inverse();
+
+      // Compute dynamically-consistent pseudoinverse
+      MatrixJ6d J_pinv = H_inv * J_t * ( J * H_inv * J_t ).inverse();
+
+      // Compute nullspace projector
+      MatrixJJd eye(n_dof_,n_dof_);
+      eye = Eigen::MatrixXd::Identity(n_dof_,n_dof_);
+      MatrixJJd JpJ = (J_pinv * J);
+      MatrixJJd N = eye - JpJ;
+      MatrixJJd N_t = N.transpose();
+      
+      // Nullspace damping term //////////////////////////////////////////////////////////////////////
+      {
+        joint_effort_null_ += -1.0 * (joint_d_gains_.array() * joint_velocity_.array()).matrix();
+      }
+
+      // Singularity avoidance term //////////////////////////////////////////////////////////////////
+      // Yoshikawa, 1984: "Analysis and Control of Robot Manipulators with Redundancy" ///////////////
+      {
+        // Compute manipulability
+        Matrix6d G = J*J_t;
+        Matrix6d G_inv = G.inverse();
+        manipulability_ = sqrt(G.determinant());
+
+        const double q_plus = 1E-4;
+        KDL::Jacobian jac_plus(n_dof_);
+        KDL::JntArray positions_plus(n_dof_);
+
+        // Add the singularity avoidance from each joint component
+        for(unsigned l=0; l < n_dof_; l++) {
+          // Compute jacobian joint position derivative
+          positions_plus.data = positions_.data;
+          positions_plus.data(l) += q_plus;
+
+          if(jac_solver_->JntToJac(positions_plus, jac_plus) != 0) {
+            RTT::log(RTT::Error) << "Could not compute manipulator jacobian for manipulator jacobian derivative." << RTT::endlog();
+            this->error();
+            return;
+          }
+          Matrix6Jd dJdq = (jac_plus.data - J)/q_plus;
+
+          for(unsigned i=0; i<6; i++) {
+            for(unsigned j=0; j<6; j++) {
+              joint_effort_null_(l) = 
+                0.5*
+                singularity_avoidance_gain_*
+                manipulability_*
+                G_inv(i,j)*
+                (dJdq.row(i).dot(J.row(j)) + dJdq.row(j).dot(J.row(i)));
+            }
+          }
+        }
+      }
+
+      joint_effort_raw_ += N_t*joint_effort_null_;
+    }
+
     // Project the hell out of it
-    joint_effort_ = joint_effort_raw_ + N_t*joint_effort_null_;
+    joint_effort_ = joint_effort_raw_;
 
     // Check effort tolerances
     linear_effort_norm_ = wrench_.block(0,0,3,1).norm();
@@ -299,7 +387,7 @@ void JTNullspaceController::updateHook()
 
     // Debug visualization
     if(this->debug_throttle_.ready(0.05)) {
-      wrench_msg_.header.frame_id = tip_link_;
+      wrench_msg_.header.frame_id = root_link_;
       wrench_msg_.header.stamp = rtt_rosclock::host_rt_now();
       wrench_msg_.wrench.force.x = wrench_(0);
       wrench_msg_.wrench.force.y = wrench_(1);
@@ -320,6 +408,8 @@ void JTNullspaceController::updateHook()
 
 void JTNullspaceController::stopHook()
 {
+  joint_position_in_.clear();
+  joint_velocity_in_.clear();
 }
 
 void JTNullspaceController::cleanupHook()

@@ -21,6 +21,7 @@
   <build_depend>rtt_rosparam</build_depend>
   <build_depend>rtt_actionlib</build_depend>
   <build_depend>rtt_ros_tools</build_depend>
+  <build_depend>rtt_tf</build_depend>
   <build_depend>rtt_sensor_msgs</build_depend>
   <build_depend>rtt_control_msgs</build_depend>
   <build_depend>rtt_visualization_msgs</build_depend>
@@ -40,6 +41,7 @@
   <run_depend>rtt_rosclock</run_depend>
   <run_depend>rtt_ros_tools</run_depend>
   <run_depend>rtt_rosparam</run_depend>
+  <run_depend>rtt_tf</run_depend>
   <run_depend>rtt_sensor_msgs</run_depend>
   <run_depend>rtt_visualization_msgs</run_depend>
   <run_depend>kdl_typekit</run_depend>
@@ -58,6 +60,7 @@
       <plugin_depend>rtt_rosparam</plugin_depend>
       <plugin_depend>rtt_roscomm</plugin_depend>
       <plugin_depend>rtt_actionlib</plugin_depend>
+      <plugin_depend>rtt_tf</plugin_depend>
     </rtt_ros>
   </export>
 </package>

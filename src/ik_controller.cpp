@@ -232,7 +232,12 @@ void IKController::compute_ik(bool debug)
 
   // Compute joint coordinates of the target tip frame
   KDL::JntArray ik_hint(n_dof_);
-  ik_hint.data = positions_.q.data;
+  if(0) {
+    // TODO: parameterize this
+    ik_hint.data = positions_.q.data;
+  } else {
+    ik_hint.data = (joint_limits_min_.data + joint_limits_max_.data)/2.0;
+  }
 
   kdl_ik_solver_top_->CartToJnt(ik_hint, tip_frame_des_, positions_des_.q);
 
@@ -316,6 +321,7 @@ void IKController::updateHook()
 
 void IKController::stopHook()
 {
+  positions_in_port_.clear();
 }
 
 void IKController::cleanupHook()

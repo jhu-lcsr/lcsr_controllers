@@ -17,6 +17,7 @@
 
 #include <kdl_conversions/kdl_msg.h>
 
+#include <rtt_tf/tf_interface.h>
 #include <rtt_ros_tools/throttles.h>
 
 #include <geometry_msgs/WrenchStamped.h>
@@ -36,6 +37,7 @@ namespace lcsr_controllers {
     std::string robot_description_;
     std::string root_link_;
     std::string tip_link_;
+    std::string target_frame_;
 
     // RTT Ports
     RTT::InputPort<Eigen::VectorXd> joint_position_in_;
@@ -62,6 +64,9 @@ namespace lcsr_controllers {
     KDL::Tree kdl_tree_;
     KDL::Chain kdl_chain_;
     double
+      manipulability_,
+      limit_avoidance_gain_,
+      singularity_avoidance_gain_,
       linear_p_gain_,
       linear_d_gain_,
       linear_effort_threshold_,
@@ -111,6 +116,8 @@ namespace lcsr_controllers {
     geometry_msgs::PoseStamped pose_msg_;
 
     rtt_ros_tools::PeriodicThrottle debug_throttle_;
+
+    rtt_tf::TFInterface tf_;
   };
 }
 
