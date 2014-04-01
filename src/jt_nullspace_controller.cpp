@@ -35,7 +35,7 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   // Working variables
   ,n_dof_(0)
   // Params
-  ,limit_avoidance_gain_(0.0)
+  ,joint_center_gain_(0.0)
   ,singularity_avoidance_gain_(0.0)
   ,linear_p_gain_(0.0)
   ,linear_d_gain_(0.0)
@@ -74,7 +74,7 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
 
   this->addProperty("manipulability",manipulability_);
   this->addProperty("singularity_avoidance_gain",singularity_avoidance_gain_);
-  this->addProperty("limit_avoidance_gain",limit_avoidance_gain_);
+  this->addProperty("joint_center_gain",joint_center_gain_);
   this->addProperty("linear_p_gain",linear_p_gain_);
   this->addProperty("linear_d_gain",linear_d_gain_);
   this->addProperty("linear_position_threshold",linear_position_threshold_);
@@ -129,7 +129,7 @@ bool JTNullspaceController::configureHook()
   rosparam->getComponentPrivate("tip_link");
   rosparam->getComponentPrivate("target_frame");
   rosparam->getComponentPrivate("singularity_avoidance_gain");
-  rosparam->getComponentPrivate("limit_avoidance_gain");
+  rosparam->getComponentPrivate("joint_center_gain");
   rosparam->getComponentPrivate("linear_p_gain");
   rosparam->getComponentPrivate("linear_d_gain");
   rosparam->getComponentPrivate("linear_effort_threshold");
@@ -156,6 +156,23 @@ bool JTNullspaceController::configureHook()
   {
     RTT::log(RTT::Error) << "Could not initialize robot kinematics!" << RTT::endlog();
     return false;
+  }
+
+  // Get joint limits
+  {
+    joint_limits_min_.resize(n_dof_);
+    joint_limits_max_.resize(n_dof_);
+    joint_limits_center_.resize(n_dof_);
+    unsigned int i=0;
+    for(std::vector<KDL::Segment>::const_iterator it=kdl_chain_.segments.begin();
+        it != kdl_chain_.segments.end();
+        it++)
+    {
+      joint_limits_min_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->lower;
+      joint_limits_max_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->upper;
+      joint_limits_center_(i) = (joint_limits_min_(i) + joint_limits_max_(i));
+      i++;
+    }
   }
 
   // Initialize IK solver
@@ -356,6 +373,11 @@ void JTNullspaceController::updateHook()
             }
           }
         }
+      }
+
+      // Joint limit avoidance term //////////////////////////////////////////////////////////////////
+      {
+        joint_effort_null_ += joint_center_gain_*(joint_limits_center_-joint_position_);
       }
 
       joint_effort_raw_ += N_t*joint_effort_null_;

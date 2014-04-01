@@ -11,8 +11,6 @@
 #include <kdl/jntarrayvel.hpp>
 #include <kdl/tree.hpp>
 #include <kdl/chain.hpp>
-//#include <kdl/chainidsolver_recursive_newton_euler.hpp>
-//#include <kdl/chainfksolverpos_recursive.hpp>
 #include <kdl/chainjnttojacsolver.hpp>
 #include <kdl/chainfksolverpos_recursive.hpp>
 #include <kdl/chainiksolverpos_nr.hpp>
@@ -26,7 +24,6 @@
 //#include <rtt_ros_tools/throttles.h>
 #include <tf/tf.h>
 
-//#include <geometry_msgs/WrenchStamped.h>
 #include <trajectory_msgs/JointTrajectory.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <sensor_msgs/JointState.h>
@@ -41,19 +38,17 @@ namespace lcsr_controllers {
     std::string root_link_;
     std::string tip_link_;
     std::string target_frame_;
-
-    std::vector<double> kp_; // proportional gains
-    std::vector<double> kd_; // derivative gains
+    std::vector<int> hint_modes_;
+    Eigen::VectorXd hint_positions_;
 
     // RTT Ports
     RTT::InputPort<Eigen::VectorXd> positions_in_port_;
     RTT::OutputPort<Eigen::VectorXd> positions_out_port_;
-    RTT::OutputPort<Eigen::VectorXd> torques_out_port_;
+    RTT::OutputPort<Eigen::VectorXd> velocities_out_port_;
     RTT::OutputPort<trajectory_msgs::JointTrajectory> trajectories_out_port_;
     RTT::OutputPort<sensor_msgs::JointState> joint_state_desired_out_;
 
     // RTT Debug Ports
-    RTT::OutputPort<Eigen::VectorXd> torques_debug_out_;
     RTT::OutputPort<trajectory_msgs::JointTrajectory> trajectories_debug_out_;
 
     RTT::OperationCaller<geometry_msgs::TransformStamped(const std::string&,
@@ -68,7 +63,7 @@ namespace lcsr_controllers {
     virtual void cleanupHook();
 
     void test_ik();
-    void compute_ik(bool debug);
+    void compute_ik(const bool debug, const ros::Duration dt);
   private:
 
     // Kinematic properties
@@ -81,14 +76,15 @@ namespace lcsr_controllers {
     // Working variables
     KDL::JntArrayVel positions_;
     KDL::JntArrayVel positions_des_;
-    KDL::JntArray torques_;
+    KDL::JntArrayVel positions_des_last_;
+    KDL::JntArray ik_hint_;
 
     // Joint limits
     KDL::JntArray joint_limits_min_;
     KDL::JntArray joint_limits_max_;
 
     // KDL IK solver which accounts for joint limits
-    boost::scoped_ptr<KDL::ChainIkSolverPos> kdl_ik_solver_top_;
+    boost::scoped_ptr<KDL::ChainIkSolverPos> kdl_ik_solver_pos_;
     boost::scoped_ptr<KDL::ChainIkSolverVel> kdl_ik_solver_vel_;
 
     // KDL FK solver
@@ -98,11 +94,16 @@ namespace lcsr_controllers {
     tf::Transform tip_frame_tf_;
     KDL::Frame tip_frame_;
     KDL::Frame tip_frame_des_;
+    KDL::Frame tip_frame_des_last_;
+    KDL::Twist tip_frame_twist_;
 
     trajectory_msgs::JointTrajectory trajectory_;
     sensor_msgs::JointState joint_state_desired_;
 
     rtt_ros_tools::PeriodicThrottle ros_publish_throttle_;
+
+    ros::Time update_time_;
+    ros::Time last_update_time_;
   };
 }
 

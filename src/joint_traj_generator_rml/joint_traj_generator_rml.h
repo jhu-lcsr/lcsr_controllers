@@ -121,6 +121,8 @@ namespace lcsr_controllers {
 
     //! Segments to follow
     TrajSegments segments_;
+    //! A copy of the active segment (the one currently solved in RMLAPI)
+    TrajSegment active_segment_;
 
     //! Convert a ROS trajectory message to a list of TrajSegments
     static bool TrajectoryMsgToSegments(
@@ -150,13 +152,16 @@ namespace lcsr_controllers {
         const ros::Time rtt_now,
         const Eigen::VectorXd &joint_position,
         const Eigen::VectorXd &joint_velocity,
+        const Eigen::VectorXd &joint_acceleration,
         boost::shared_ptr<ReflexxesAPI> rml,
         boost::shared_ptr<RMLPositionInputParameters> rml_in,
         boost::shared_ptr<RMLPositionOutputParameters> rml_out,
         RMLPositionFlags &rml_flags,
         JointTrajGeneratorRML::TrajSegments &segments,
+        JointTrajGeneratorRML::TrajSegment &active_segment,
         Eigen::VectorXd &joint_position_sample,
-        Eigen::VectorXd &joint_velocity_sample) const;
+        Eigen::VectorXd &joint_velocity_sample,
+        Eigen::VectorXd &joint_acceleration_sample) const;
 
     //! Output information about some RML input parameters
     static void RMLLog(
@@ -246,8 +251,11 @@ namespace lcsr_controllers {
       joint_position_sample_,
       joint_position_err_,
       joint_velocity_,
+      joint_velocity_last_,
       joint_velocity_sample_,
-      joint_velocity_err_;
+      joint_velocity_err_,
+      joint_acceleration_,
+      joint_acceleration_sample_;
 
     trajectory_msgs::JointTrajectoryPoint joint_traj_point_cmd_;
     trajectory_msgs::JointTrajectory joint_traj_cmd_;

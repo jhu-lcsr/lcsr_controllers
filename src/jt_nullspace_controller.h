@@ -65,8 +65,8 @@ namespace lcsr_controllers {
     KDL::Chain kdl_chain_;
     double
       manipulability_,
-      limit_avoidance_gain_,
       singularity_avoidance_gain_,
+      joint_center_gain_,
       linear_p_gain_,
       linear_d_gain_,
       linear_effort_threshold_,
@@ -109,7 +109,10 @@ namespace lcsr_controllers {
       joint_effort_,
       joint_effort_raw_,
       joint_effort_null_,
-      joint_d_gains_;
+      joint_d_gains_,
+      joint_limits_min_,
+      joint_limits_max_,
+      joint_limits_center_;
 
     geometry_msgs::WrenchStamped wrench_msg_;
     geometry_msgs::PoseStamped pose_err_msg_;

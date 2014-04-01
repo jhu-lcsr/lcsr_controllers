@@ -34,16 +34,11 @@ IKController::IKController(std::string const& name) :
   ,kdl_tree_()
   ,kdl_chain_()
   ,positions_()
-  ,torques_()
-  ,kp_(7,0.0)
-  ,kd_(7,0.0)
   ,ros_publish_throttle_(0.02)
 {
   // Declare properties
   this->addProperty("robot_description",robot_description_)
-    .doc("The WAM URDF xml string.");
-  this->addProperty("kd",kd_);
-  this->addProperty("kp",kp_);
+    .doc("The URDF xml string.");
 
   this->addProperty("root_link",root_link_)
     .doc("The root link for the controller.");
@@ -51,16 +46,18 @@ IKController::IKController(std::string const& name) :
     .doc("The tip link for the controller.");
   this->addProperty("target_frame",target_frame_)
     .doc("The target frame to track with tip_link.");
-  //this->addProperty("compensate_end_effector",compensate_end_effector_)
-  //  .doc("Will compute a wrench on the tip link if true.");
+  this->addProperty("hint_modes",hint_modes_)
+    .doc("IK hint mode for joints. (0: use current joint value, 1: use middle of joint range, 2: use value specified in hint_positions vector)");
+  this->addProperty("hint_positions",hint_positions_)
+    .doc("IK hint position.");
 
   // Configure data ports
   this->ports()->addPort("positions_in", positions_in_port_)
     .doc("Input port: nx1 vector of joint positions. (n joints)");
   this->ports()->addPort("positions_out", positions_out_port_)
-    .doc("Output port: nx1 vector of desired joint positins. (n joints)");
-  this->ports()->addPort("torques_out", torques_out_port_)
-    .doc("Output port: nx1 vector of joint torques. (n joints)");
+    .doc("Output port: nx1 vector of desired joint positions. (n joints)");
+  this->ports()->addPort("velocities_out", velocities_out_port_)
+    .doc("Output port: nx1 vector of desired joint velocities. (n joints)");
   this->ports()->addPort("trajectories_out", trajectories_out_port_)
     .doc("Output port: nx1 vector of joint trajectories. (n joints)");
 
@@ -86,6 +83,8 @@ bool IKController::configureHook()
   rosparam->getComponentPrivate("target_frame");
   rosparam->getComponentPrivate("kp");
   rosparam->getComponentPrivate("kd");
+  rosparam->getComponentPrivate("hint_modes");
+  rosparam->getComponentPrivate("hint_positions");
 
   if(this->hasPeer("tf")) {
     TaskContext* tf_task = this->getPeer("tf");
@@ -114,10 +113,6 @@ bool IKController::configureHook()
     return false;
   }
 
-  if(kp_.size() < n_dof_ || kd_.size() < n_dof_) {
-    RTT::log(RTT::Error) << "Not enough gains!" << RTT::endlog();
-  }
-
   // Get joint names
   joint_state_desired_.name.clear();
   joint_state_desired_.name.reserve(n_dof_);
@@ -131,9 +126,10 @@ bool IKController::configureHook()
   // Resize working variables
   positions_.resize(n_dof_);
   positions_des_.resize(n_dof_);
+  positions_des_last_.resize(n_dof_);
   joint_limits_min_.resize(n_dof_);
   joint_limits_max_.resize(n_dof_);
-  torques_.resize(n_dof_);
+  ik_hint_.resize(n_dof_);
 
   // Get joint limits from URDF model
   {
@@ -168,16 +164,20 @@ bool IKController::configureHook()
   trajectory_.points.push_back(single_point);
 
 
-  // Initialize IK solver
+  // Initialize FK solver
   kdl_fk_solver_pos_.reset(
       new KDL::ChainFkSolverPos_recursive(kdl_chain_));
+
+  // Initialize velocity IK solver
   kdl_ik_solver_vel_.reset(
       new KDL::ChainIkSolverVel_wdls(
         kdl_chain_,
         1.0E-6,
         150));
-#ifdef USE_NR_JL
-  kdl_ik_solver_top_.reset(
+
+  // Initialize position IK solver
+#if 0
+  kdl_ik_solver_pos_.reset(
       new KDL::ChainIkSolverPos_NR_JL(
         kdl_chain_,
         joint_limits_min_,
@@ -186,10 +186,8 @@ bool IKController::configureHook()
         *kdl_ik_solver_vel_,
         250,
         1.0E-6));
-#endif
-
-#if 1
-  kdl_ik_solver_top_.reset(
+#else
+  kdl_ik_solver_pos_.reset(
       new KDL::ChainIkSolverPos_LMA(
         kdl_chain_,
         1E-5,
@@ -197,24 +195,24 @@ bool IKController::configureHook()
         1E-15));
 #endif
 
-  // Zero out torque data
-  torques_.data.setZero();
+  // Zero out data
   positions_.q.data.setZero();
   positions_.qdot.data.setZero();
   positions_des_.q.data.setZero();
   positions_des_.qdot.data.setZero();
+  positions_des_last_.q.data.setZero();
+  positions_des_last_.qdot.data.setZero();
 
   // Prepare ports for realtime processing
   positions_out_port_.setDataSample(positions_des_.q.data);
-  torques_out_port_.setDataSample(torques_.data);
   trajectories_out_port_.setDataSample(trajectory_);
 
   return true;
 }
 
-void IKController::test_ik() { this->compute_ik(true); }
+void IKController::test_ik() { this->compute_ik(true, ros::Duration(1.0)); }
 
-void IKController::compute_ik(bool debug)
+void IKController::compute_ik(const bool debug, const ros::Duration dt)
 {
   // Read in the current joint positions
   positions_in_port_.readNewest( positions_.q.data );
@@ -230,16 +228,24 @@ void IKController::compute_ik(bool debug)
   tf::transformMsgToTF(tip_frame_msg_.transform, tip_frame_tf_);
   tf::TransformTFToKDL(tip_frame_tf_,tip_frame_des_);
 
-  // Compute joint coordinates of the target tip frame
-  KDL::JntArray ik_hint(n_dof_);
-  if(0) {
-    // TODO: parameterize this
-    ik_hint.data = positions_.q.data;
-  } else {
-    ik_hint.data = (joint_limits_min_.data + joint_limits_max_.data)/2.0;
+  // Get cartesian velocity
+  //tip_frame_twist_ = KDL::diff(tip_frame_des_last_, tip_frame_des_, dt.toSec());
+  //tip_frame_des_last_ = tip_frame_des_;
+
+  // Select ik hint by joint
+  for(unsigned int i=0; i<n_dof_; i++) {
+    switch(hint_modes_[i]) {
+      case 0:
+        ik_hint_(i) = positions_.q(i); break;
+      case 1:
+        ik_hint_(i) = (joint_limits_min_(i) + joint_limits_max_(i))/2.0; break;
+      case 2:
+        ik_hint_(i) = hint_positions_(i); break;
+    };
   }
 
-  kdl_ik_solver_top_->CartToJnt(ik_hint, tip_frame_des_, positions_des_.q);
+  // Compute joint coordinates of the target tip frame
+  kdl_ik_solver_pos_->CartToJnt(ik_hint_, tip_frame_des_, positions_des_.q);
 
   if(debug) {
     RTT::log(RTT::Debug)<<"Unwrapped angles: "<<(positions_des_.q.data.transpose)()<<RTT::endlog();
@@ -254,23 +260,19 @@ void IKController::compute_ik(bool debug)
     }
   }
 
+  // Compute joint velocities
+  //if(dt.toSec() > 1E-5) {
+    //positions_des_.qdot.data = (positions_des_.q.data - positions_des_last_.q.data)/dt.toSec();
+  //} else {
+    positions_des_.qdot.data.setZero();
+  //}
+
   if(debug) {
     RTT::log(RTT::Debug)<<"Wrapped angles: "<<(positions_des_.q.data.transpose())<<RTT::endlog();
-  }
-
-  // Servo in jointspace to the appropriate joint coordinates
-  for(unsigned int i=0; i<n_dof_; i++) {
-    torques_(i) =
-      kp_[i]*(positions_des_.q(i) - positions_.q(i))
-      + kd_[i]*(positions_des_.qdot(i) - positions_.qdot(i));
-  }
-
-  if(debug) {
     ROS_INFO_STREAM("Current position: "<<positions_.q.data.transpose());
     ROS_INFO_STREAM("Current velocity: "<<positions_.qdot.data.transpose());
     ROS_INFO_STREAM("IK result: "<<positions_des_.q.data.transpose());
     ROS_INFO_STREAM("Displacement: "<<(positions_des_.q.data-positions_.q.data).transpose());
-    ROS_INFO_STREAM("Torques: "<<torques_.data.transpose());
   }
 }
 
@@ -282,32 +284,36 @@ bool IKController::startHook()
     RTT::log(RTT::Error)<<"Could not look up transform from \""<<root_link_<<"\" to \""<<target_frame_<<"\": "<<ex.what()<<RTT::endlog();
     return false;
   }
+
+  last_update_time_ = rtt_rosclock::rtt_now();
   return true;
 }
 
 void IKController::updateHook()
 {
   // Compute the inverse kinematics solution
-  this->compute_ik(false);
+  update_time_ = rtt_rosclock::rtt_now();
+  this->compute_ik(false, update_time_-last_update_time_);
+  last_update_time_ = update_time_;
 
   // Send position target
   positions_out_port_.write( positions_des_.q.data );
+  velocities_out_port_.write( positions_des_.qdot.data );
 
   // Publish debug traj to ros
   if(ros_publish_throttle_.ready(0.02)) 
   {
-  // Send traj target
-  if(trajectories_out_port_.connected()) {
-    trajectory_.header.stamp = ros::Time(0,0);
+    // Send traj target
+    if(trajectories_out_port_.connected()) {
+      trajectory_.header.stamp = ros::Time(0,0);
 
-    for(size_t i=0; i<n_dof_; i++) {
-      trajectory_.points[0].positions[i] = positions_des_.q(i);
-      trajectory_.points[0].velocities[i] = positions_des_.qdot(i);
+      for(size_t i=0; i<n_dof_; i++) {
+        trajectory_.points[0].positions[i] = positions_des_.q(i);
+        trajectory_.points[0].velocities[i] = positions_des_.qdot(i);
+      }
+
+      trajectories_out_port_.write( trajectory_ );
     }
-
-    trajectories_out_port_.write( trajectory_ );
-  }
-
 
     // Publish controller desired state
     joint_state_desired_.header.stamp = rtt_rosclock::host_rt_now();
