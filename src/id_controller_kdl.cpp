@@ -21,6 +21,7 @@ using namespace lcsr_controllers;
 IDControllerKDL::IDControllerKDL(std::string const& name) :
   TaskContext(name)
   // Properties
+  ,robot_description_param_("/robot_description")
   ,robot_description_("")
   ,root_link_("")
   ,tip_link_("")
@@ -42,6 +43,8 @@ IDControllerKDL::IDControllerKDL(std::string const& name) :
   gravity_.setZero();
     
   // Declare properties
+  this->addProperty("robot_description_param",robot_description_param_)
+    .doc("The ROS parameter for the URDF xml string. (default: '/robot_description')");
   this->addProperty("robot_description",robot_description_)
     .doc("The WAM URDF xml string.");
   // TODO: Get gravity from world frame
@@ -75,7 +78,8 @@ bool IDControllerKDL::configureHook()
   // ROS parameters
   boost::shared_ptr<rtt_rosparam::ROSParam> rosparam = this->getProvider<rtt_rosparam::ROSParam>("rosparam");
   // Get absoluate parameters
-  rosparam->getAbsolute("robot_description");
+  rosparam->getComponentPrivate("robot_description_param");
+  rosparam->getParam(robot_description_param_, "robot_description");
   // Get private parameters
   rosparam->getComponentPrivate("root_link");
   rosparam->getComponentPrivate("tip_link");

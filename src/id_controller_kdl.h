@@ -23,6 +23,7 @@ namespace lcsr_controllers {
   class IDControllerKDL : public RTT::TaskContext
   {
     // RTT Properties
+    std::string robot_description_param_;
     std::string robot_description_;
     std::string root_link_;
     std::string tip_link_;
