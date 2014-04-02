@@ -21,6 +21,7 @@ JointPIDController::JointPIDController(std::string const& name) :
   TaskContext(name)
   // Properties
   ,robot_description_("")
+  ,robot_description_param_("/robot_description")
   ,root_link_("")
   ,tip_link_("")
   // Working variables
@@ -30,6 +31,7 @@ JointPIDController::JointPIDController(std::string const& name) :
 {
   // Declare properties
   this->addProperty("robot_description",robot_description_).doc("The WAM URDF xml string.");
+  this->addProperty("robot_description_param",robot_description_param_).doc("The ROS parameter name for the WAM URDF xml string.");
   this->addProperty("root_link",root_link_).doc("The root link for the controller.");
   this->addProperty("tip_link",tip_link_).doc("The tip link for the controller.");
   this->addProperty("p_gains",p_gains_).doc("Proportional gains.");
@@ -62,10 +64,12 @@ bool JointPIDController::configureHook()
   boost::shared_ptr<rtt_rosparam::ROSParam> rosparam =
     this->getProvider<rtt_rosparam::ROSParam>("rosparam");
   // Get absoluate parameters
-  rosparam->getAbsolute("robot_description");
+  //rosparam->getAbsolute("robot_description");
   // Get private parameters
   rosparam->getComponentPrivate("root_link");
   rosparam->getComponentPrivate("tip_link");
+  rosparam->getComponentPrivate("robot_description_param");
+  rosparam->getParam(robot_description_param_, "robot_description");
 
   // Initialize kinematics (KDL tree, KDL chain, and #DOF)
   urdf::Model urdf_model;

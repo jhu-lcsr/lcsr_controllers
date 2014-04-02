@@ -84,8 +84,13 @@ bool JointTrajGeneratorKDL::configureHook()
   rosparam->getComponentPrivate("trap_max_accs");
   rosparam->getComponentPrivate("position_tolerance");
   rosparam->getComponentPrivate("velocity_smoothing_factor");
-  rosparam->getComponentPrivate("robot_description_param_");
+  rosparam->getComponentPrivate("robot_description_param");
   rosparam->getParam(robot_description_param_, "robot_description");
+
+  if(robot_description_.size() < 1) {
+    RTT::log(RTT::Error) << "Error loading \"robot_description\": field is empty." << RTT::endlog();
+    RTT::log(RTT::Error) << "Attempted to load from \"" << robot_description_param_ << "\"" << RTT::endlog();
+  }
 
   // Initialize kinematics (KDL tree, KDL chain, and #DOF)
   urdf::Model urdf_model;
