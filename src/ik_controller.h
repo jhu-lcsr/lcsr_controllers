@@ -35,6 +35,7 @@ namespace lcsr_controllers {
   {
     // RTT Properties
     std::string robot_description_;
+    std::string robot_description_param_;
     std::string root_link_;
     std::string tip_link_;
     std::string target_frame_;
