@@ -240,7 +240,7 @@ void IDControllerKDL::updateHook()
     // Debug visualization
     if(this->debug_throttle_.ready(0.05)) {
       wrench_msg_.header.frame_id = tip_link_;
-      wrench_msg_.header.stamp = rtt_rosclock::host_rt_now();
+      wrench_msg_.header.stamp = rtt_rosclock::host_now();
       wrench_msg_.wrench.force.x = ext_wrenches_.back().force.x();
       wrench_msg_.wrench.force.y = ext_wrenches_.back().force.y();
       wrench_msg_.wrench.force.z = ext_wrenches_.back().force.z();

@@ -410,7 +410,7 @@ void JTNullspaceController::updateHook()
     // Debug visualization
     if(this->debug_throttle_.ready(0.05)) {
       wrench_msg_.header.frame_id = root_link_;
-      wrench_msg_.header.stamp = rtt_rosclock::host_rt_now();
+      wrench_msg_.header.stamp = rtt_rosclock::host_now();
       wrench_msg_.wrench.force.x = wrench_(0);
       wrench_msg_.wrench.force.y = wrench_(1);
       wrench_msg_.wrench.force.z = wrench_(2);
@@ -421,7 +421,7 @@ void JTNullspaceController::updateHook()
 
       KDL::Frame frame_err_(framevel_err_.M.R,framevel_err_.p.p);
       pose_err_msg_.header.frame_id = tip_link_;
-      pose_err_msg_.header.stamp = rtt_rosclock::host_rt_now();
+      pose_err_msg_.header.stamp = rtt_rosclock::host_now();
       tf::poseKDLToMsg(frame_err_,pose_err_msg_.pose);
       err_pose_debug_out_.write(pose_err_msg_);
     }

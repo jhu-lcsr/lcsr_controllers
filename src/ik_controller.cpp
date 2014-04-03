@@ -316,7 +316,7 @@ void IKController::updateHook()
     }
 
     // Publish controller desired state
-    joint_state_desired_.header.stamp = rtt_rosclock::host_rt_now();
+    joint_state_desired_.header.stamp = rtt_rosclock::host_now();
     joint_state_desired_.position.resize(n_dof_);
     joint_state_desired_.velocity.resize(n_dof_);
     std::copy(positions_des_.q.data.data(), positions_des_.q.data.data() + n_dof_, joint_state_desired_.position.begin());

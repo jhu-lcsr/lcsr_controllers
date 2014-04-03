@@ -635,7 +635,7 @@ bool JointTrajGeneratorRML::updateSegments(
       // Offset the NTP-corrected time to get the RTT-time
       // Correct the timestamp so that its relative to the realtime clock
       // TODO: make it so this can be disabled or make two different ports
-      new_traj_start_time = trajectory.header.stamp - ros::Duration(rtt_rosclock::host_rt_offset_from_rtt());
+      new_traj_start_time = trajectory.header.stamp + (rtt_rosclock::rtt_now() - rtt_rosclock::host_now());
     }
 
     // Get the proper index permutation
@@ -813,7 +813,7 @@ void JointTrajGeneratorRML::updateHook()
     if(ros_publish_throttle_.ready(0.02)) 
     {
       // Publish controller desired state
-      joint_state_desired_.header.stamp = rtt_rosclock::host_rt_now();
+      joint_state_desired_.header.stamp = rtt_rosclock::host_now();
       joint_state_desired_.position.resize(n_dof_);
       joint_state_desired_.velocity.resize(n_dof_);
       std::copy(joint_position_sample_.data(), joint_position_sample_.data() + n_dof_, joint_state_desired_.position.begin());

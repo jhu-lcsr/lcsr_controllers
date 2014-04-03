@@ -210,7 +210,7 @@ void JointTrajGeneratorKDL::updateHook()
 
     // Publish debug traj to ros
     if(ros_publish_throttle_.ready()) {
-      joint_state_desired_.header.stamp = rtt_rosclock::host_rt_now();
+      joint_state_desired_.header.stamp = rtt_rosclock::host_now();
       joint_state_desired_.position.resize(n_dof_);
       joint_state_desired_.velocity.resize(n_dof_);
       std::copy(joint_position_sample_.data(), joint_position_sample_.data() + n_dof_, joint_state_desired_.position.begin());
