@@ -39,6 +39,7 @@ namespace lcsr_controllers {
     bool use_rosparam_;
     bool use_rostopic_;
     std::string robot_description_;
+    std::string robot_description_param_;
     std::string root_link_;
     std::string tip_link_;
     unsigned int n_dof_;
