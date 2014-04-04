@@ -242,6 +242,12 @@ bool JointTrajGeneratorRML::startHook()
   joint_velocity_last_.setZero();
   joint_acceleration_.setZero();
 
+  joint_position_in_.clear();
+  joint_velocity_in_.clear();
+  joint_position_cmd_in_.clear();
+  joint_traj_point_cmd_in_.clear();
+  joint_traj_cmd_in_.clear();
+
   return true;
 }
 
