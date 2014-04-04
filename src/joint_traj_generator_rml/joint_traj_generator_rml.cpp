@@ -107,12 +107,16 @@ bool JointTrajGeneratorRML::configureHook()
     rosparam = this->getProvider<rtt_rosparam::ROSParam>("rosparam");
     
     // Only get kinematics from robot description if n_dof_ hasn't been set
-    //rosparam->getAbsolute("robot_description");
     rosparam->getComponentPrivate("n_dof");
     rosparam->getComponentPrivate("root_link");
     rosparam->getComponentPrivate("tip_link");
+
     rosparam->getComponentPrivate("robot_description_param");
-    rosparam->getParam(robot_description_param_,"robot_description");
+    rosparam->getParam(robot_description_param_, "robot_description");
+    if(robot_description_.length() == 0) {
+      RTT::log(RTT::Error) << "No robot description! Reading from parameter \"" << robot_description_param_ << "\"" << RTT::endlog();
+      return false;
+    }
   }
 
   // Initialize kinematics (KDL tree, KDL chain, and #DOF) from urdf

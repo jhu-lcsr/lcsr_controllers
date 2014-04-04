@@ -40,7 +40,6 @@ IKController::IKController(std::string const& name) :
   // Declare properties
   this->addProperty("robot_description",robot_description_)
     .doc("The URDF xml string.");
-
   this->addProperty("robot_description_param",robot_description_param_)
     .doc("The ROS parameter name for the URDF xml string.");
 
@@ -79,8 +78,6 @@ bool IKController::configureHook()
 {
   // ROS parameters
   boost::shared_ptr<rtt_rosparam::ROSParam> rosparam = this->getProvider<rtt_rosparam::ROSParam>("rosparam");
-  // Get absoluate parameters
-  //rosparam->getAbsolute("robot_description");
   // Get private parameters
   rosparam->getComponentPrivate("root_link");
   rosparam->getComponentPrivate("tip_link");
@@ -92,9 +89,9 @@ bool IKController::configureHook()
 
   rosparam->getComponentPrivate("robot_description_param");
   rosparam->getParam(robot_description_param_, "robot_description");
-  if(robot_description_.size() < 1) {
-    RTT::log(RTT::Error) << "\"robot_description\" is empty! reading from parameter ";
-    RTT::log(RTT::Error) << robot_description_param_ << RTT::endlog();
+  if(robot_description_.length() == 0) {
+    RTT::log(RTT::Error) << "No robot description! Reading from parameter \"" << robot_description_param_ << "\"" << RTT::endlog();
+    return false;
   }
 
   if(this->hasPeer("tf")) {

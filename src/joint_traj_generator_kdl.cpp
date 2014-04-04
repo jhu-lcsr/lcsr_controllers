@@ -77,19 +77,19 @@ bool JointTrajGeneratorKDL::configureHook()
   // ROS parameters
   boost::shared_ptr<rtt_rosparam::ROSParam> rosparam =
     this->getProvider<rtt_rosparam::ROSParam>("rosparam");
-  //rosparam->getAbsolute("robot_description");
+
   rosparam->getComponentPrivate("root_link");
   rosparam->getComponentPrivate("tip_link");
   rosparam->getComponentPrivate("trap_max_vels");
   rosparam->getComponentPrivate("trap_max_accs");
   rosparam->getComponentPrivate("position_tolerance");
   rosparam->getComponentPrivate("velocity_smoothing_factor");
+
   rosparam->getComponentPrivate("robot_description_param");
   rosparam->getParam(robot_description_param_, "robot_description");
-
-  if(robot_description_.size() < 1) {
-    RTT::log(RTT::Error) << "Error loading \"robot_description\": field is empty." << RTT::endlog();
-    RTT::log(RTT::Error) << "Attempted to load from \"" << robot_description_param_ << "\"" << RTT::endlog();
+  if(robot_description_.length() == 0) {
+    RTT::log(RTT::Error) << "No robot description! Reading from parameter \"" << robot_description_param_ << "\"" << RTT::endlog();
+    return false;
   }
 
   // Initialize kinematics (KDL tree, KDL chain, and #DOF)

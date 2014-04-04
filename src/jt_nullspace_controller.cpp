@@ -125,8 +125,6 @@ bool JTNullspaceController::configureHook()
 {
   // ROS parameters
   boost::shared_ptr<rtt_rosparam::ROSParam> rosparam = this->getProvider<rtt_rosparam::ROSParam>("rosparam");
-  // Get absoluate parameters
-  //rosparam->getAbsolute("robot_description");
   // Get private parameters
   rosparam->getComponentPrivate("root_link");
   rosparam->getComponentPrivate("tip_link");
@@ -146,6 +144,10 @@ bool JTNullspaceController::configureHook()
 
   rosparam->getComponentPrivate("robot_description_param");
   rosparam->getParam(robot_description_param_, "robot_description");
+  if(robot_description_.length() == 0) {
+    RTT::log(RTT::Error) << "No robot description! Reading from parameter \"" << robot_description_param_ << "\"" << RTT::endlog();
+    return false;
+  }
 
   if(!tf_.ready()) {
     RTT::log(RTT::Error) << this->getName() << " controller is not connected to tf!" << RTT::endlog(); 
