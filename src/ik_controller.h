@@ -3,7 +3,7 @@
 
 #include <iostream>
 
-#include <boost/scoped_ptr.hpp>
+#include <boost/shared_ptr.hpp>
 
 #include <rtt/RTT.hpp>
 #include <rtt/Port.hpp>
@@ -41,6 +41,7 @@ namespace lcsr_controllers {
     std::string target_frame_;
     std::vector<int> hint_modes_;
     Eigen::VectorXd hint_positions_;
+    double damping_;
 
     // RTT Ports
     RTT::InputPort<Eigen::VectorXd> positions_in_port_;
@@ -63,8 +64,14 @@ namespace lcsr_controllers {
     virtual void stopHook();
     virtual void cleanupHook();
 
-    void test_ik();
-    void compute_ik(const bool debug, const ros::Duration dt);
+    bool compute_ik(
+        const KDL::JntArrayVel &positions,
+        const KDL::Frame &tip_frame_des,
+        KDL::JntArray &ik_hint,
+        KDL::JntArrayVel &positions_des,
+        KDL::JntArrayVel &positions_des_last,
+        const bool debug, 
+        const ros::Duration dt);
   private:
 
     // Kinematic properties
@@ -77,6 +84,7 @@ namespace lcsr_controllers {
     // Working variables
     KDL::JntArrayVel positions_;
     KDL::JntArrayVel positions_des_;
+    KDL::JntArrayVel positions_des_raw_;
     KDL::JntArrayVel positions_des_last_;
     KDL::JntArray ik_hint_;
 
@@ -85,11 +93,14 @@ namespace lcsr_controllers {
     KDL::JntArray joint_limits_max_;
 
     // KDL IK solver which accounts for joint limits
-    boost::scoped_ptr<KDL::ChainIkSolverPos> kdl_ik_solver_pos_;
-    boost::scoped_ptr<KDL::ChainIkSolverVel> kdl_ik_solver_vel_;
+    boost::shared_ptr<KDL::ChainIkSolverPos> kdl_ik_solver_pos_;
+    boost::shared_ptr<KDL::ChainIkSolverVel> kdl_ik_solver_vel_;
 
     // KDL FK solver
-    boost::scoped_ptr<KDL::ChainFkSolverPos> kdl_fk_solver_pos_;
+    boost::shared_ptr<KDL::ChainFkSolverPos> kdl_fk_solver_pos_;
+
+    // KDL Jacobian
+    boost::shared_ptr<KDL::ChainJntToJacSolver> jac_solver_;
 
     geometry_msgs::TransformStamped tip_frame_msg_;
     tf::Transform tip_frame_tf_;
@@ -105,6 +116,9 @@ namespace lcsr_controllers {
 
     ros::Time update_time_;
     ros::Time last_update_time_;
+
+    bool warn_flag_;
+
   };
 }
 
