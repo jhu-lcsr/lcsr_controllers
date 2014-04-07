@@ -178,7 +178,7 @@ bool JTNullspaceController::configureHook()
     {
       joint_limits_min_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->lower;
       joint_limits_max_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->upper;
-      joint_limits_center_(i) = (joint_limits_min_(i) + joint_limits_max_(i));
+      joint_limits_center_(i) = (joint_limits_min_(i) + joint_limits_max_(i))/2.0;
       i++;
     }
   }
@@ -327,18 +327,15 @@ void JTNullspaceController::updateHook()
         this->error();
         return;
       }
-      Eigen::MatrixXd H = joint_inertia_.data;
+      Eigen::MatrixXd H = (joint_inertia_.data); // + (eye + d_gain).inverse() * motor_inertia 
       Eigen::MatrixXd H_inv = H.inverse();
 
       // Compute dynamically-consistent pseudoinverse
-      MatrixJ6d J_pinv = H_inv * J_t * ( J * H_inv * J_t ).inverse();
+      Matrix6d L = (J * H_inv * J_t).inverse();
 
       // Compute nullspace projector
-      MatrixJJd eye(n_dof_,n_dof_);
-      eye = Eigen::MatrixXd::Identity(n_dof_,n_dof_);
-      MatrixJJd JpJ = (J_pinv * J);
-      MatrixJJd N = eye - JpJ;
-      MatrixJJd N_t = N.transpose();
+      MatrixJJd eye = MatrixJJd::Identity(n_dof_,n_dof_);
+      MatrixJJd N = eye - J_t * L * J * H_inv;
       
       // Nullspace damping term //////////////////////////////////////////////////////////////////////
       {
@@ -384,11 +381,17 @@ void JTNullspaceController::updateHook()
       }
 
       // Joint limit avoidance term //////////////////////////////////////////////////////////////////
+      if(0)
       {
+        MatrixJJd A = 1/n_dof_ * joint_position_
+        for(unsigned i=0; i<100; i++) {
+
+        }
+
         joint_effort_null_ += joint_center_gain_*(joint_limits_center_-joint_position_);
       }
 
-      joint_effort_raw_ += N_t*joint_effort_null_;
+      joint_effort_raw_ += N*joint_effort_null_;
     }
 
     // Project the hell out of it
