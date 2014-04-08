@@ -380,17 +380,6 @@ void JTNullspaceController::updateHook()
         }
       }
 
-      // Joint limit avoidance term //////////////////////////////////////////////////////////////////
-      if(0)
-      {
-        MatrixJJd A = 1/n_dof_ * joint_position_
-        for(unsigned i=0; i<100; i++) {
-
-        }
-
-        joint_effort_null_ += joint_center_gain_*(joint_limits_center_-joint_position_);
-      }
-
       joint_effort_raw_ += N*joint_effort_null_;
     }
 
