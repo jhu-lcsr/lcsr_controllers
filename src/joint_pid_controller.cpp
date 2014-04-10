@@ -9,11 +9,13 @@
 #include <kdl_parser/kdl_parser.hpp>
 
 #include <kdl_urdf_tools/tools.h>
-#include "joint_pid_controller.h"
 
 #include <rtt_rosparam/rosparam.h>
 #include <rtt_roscomm/rtt_rostopic.h>
 #include <rtt_rosclock/rtt_rosclock.h>
+
+#include "joint_pid_controller.h"
+#include "friction/joint_friction_compensator_hss.h"
 
 using namespace lcsr_controllers;
 
@@ -30,6 +32,8 @@ JointPIDController::JointPIDController(std::string const& name) :
   ,kdl_tree_()
   ,kdl_chain_()
   ,ros_publish_throttle_(0.02)
+  ,compensate_friction_(false)
+  ,static_eps_(0.0)
 {
   // Declare properties
   this->addProperty("robot_description",robot_description_).doc("The WAM URDF xml string.");
@@ -43,6 +47,10 @@ JointPIDController::JointPIDController(std::string const& name) :
   this->addProperty("position_tolerance",position_tolerance_).doc("Maximum position error.");
   this->addProperty("velocity_tolerance",velocity_tolerance_).doc("Maximum velocity error.");
   this->addProperty("tolerance_violations",tolerance_violations_).doc("Number of position or velocity tolerance violations.");
+  this->addProperty("compensate_friction",compensate_friction_).doc("Compensate for static friction if true.");
+  this->addProperty("static_effort",static_effort_).doc("Static friction effort.");
+  this->addProperty("static_deadband",static_deadband_).doc("Static friction deadband.");
+  this->addProperty("static_eps",static_eps_).doc("Static friction velocity deadband.");
   
   // Configure data ports
   this->ports()->addPort("joint_position_in", joint_position_in_);
@@ -122,6 +130,11 @@ bool JointPIDController::configureHook()
   d_gains_.resize(n_dof_);
   i_clamps_.resize(n_dof_);
 
+  static_effort_.resize(n_dof_);
+  static_effort_.setZero();
+  static_deadband_.resize(n_dof_);
+  static_deadband_.setZero();
+
   p_gains_.setZero();
   i_gains_.setZero();
   d_gains_.setZero();
@@ -133,6 +146,10 @@ bool JointPIDController::configureHook()
   rosparam->getComponentPrivate("i_clamps");
   rosparam->getComponentPrivate("position_tolerance");
   rosparam->getComponentPrivate("velocity_tolerance");
+  rosparam->getComponentPrivate("compensate_friction");
+  rosparam->getComponentPrivate("static_effort");
+  rosparam->getComponentPrivate("static_deadband");
+  rosparam->getComponentPrivate("static_eps");
 
   // Prepare ports for realtime processing
   joint_effort_out_.setDataSample(joint_effort_);
@@ -231,11 +248,26 @@ void JointPIDController::updateHook()
     joint_effort_.setZero();
   } else {
     // Compute the command
-    joint_effort_ = (
-        p_gains_.array()*joint_p_error_.array()
-        + i_gains_.array()*joint_i_error_.array()                  
-        + d_gains_.array()*joint_d_error_.array()
-        ).matrix();
+    if(compensate_friction_) {
+      for(unsigned i=0; i<n_dof_; i++) {
+        joint_effort_(i) =
+          JointFrictionCompensatorHSS::Compensate(
+              static_effort_(i),
+              static_deadband_(i),
+              p_gains_(i),
+              joint_p_error_(i),
+              joint_velocity_(i),
+              static_eps_)
+          + i_gains_(i)*joint_i_error_(i)
+          + d_gains_(i)*joint_d_error_(i);
+      }
+    } else {
+      joint_effort_ = (
+          p_gains_.array()*joint_p_error_.array()
+          + i_gains_.array()*joint_i_error_.array()                  
+          + d_gains_.array()*joint_d_error_.array()
+          ).matrix();
+    }
     
     // Check for old tolerance violations
     if(tolerance_violations_ > 0) {

@@ -14,10 +14,8 @@ This compensator is suitable for use with joint-space control schemes with a
 desired joint-space position.  It's provided as a simple library class and
 member function call.
 
-Each compensator requires 5 parameters:
+Each compensator requires 4 parameters:
 
-* The linear proportional gain used for this joint outside of the static
-  friction region.
 * Lower and upper static efforts. These are the constant torques or forces
   which will be applied within the displacement offsets of the goal position.
   These are the `T_s-` and `T_s+` in the  model below.
@@ -27,7 +25,6 @@ Each compensator requires 5 parameters:
 ```cpp
 // Create a 1D joint friction compensator with asymmetric parameters
 lcsr_controllers::friction::JointFrictionCompensatorHSS stickslip(
-  linear_p_gain,
   static_effort_low, 
   static_effort_high,
   deadband_low, 
@@ -40,8 +37,6 @@ each, as shown below:
 ```cpp
 // Create a 1D joint friction compensator with symmetric parameters
 lcsr_controllers::JointFrictionCompensatorHSS stickslip(
-  linear_p_gain,
-  static_displacement,
   static_effort,
   deadband)
 ```
@@ -51,6 +46,7 @@ Then, you can compute the nonlinear proportional gain ith the following call:
 ```cpp
 // Compute the nonlinear proportional command term during the control update
 p_term_nonlinear = stickslip.compensate(
+  linear_p_gain,
   joint_position_desired,
   joint_position,
   joint_velocity);

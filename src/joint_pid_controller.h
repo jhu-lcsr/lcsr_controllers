@@ -18,6 +18,8 @@
 
 #include <rtt_ros_tools/tools.h>
 
+#include "friction/joint_friction_compensator_hss.h"
+
 namespace lcsr_controllers {
   class JointPIDController : public RTT::TaskContext
   {
@@ -34,6 +36,8 @@ namespace lcsr_controllers {
       i_gains_,
       d_gains_,
       i_clamps_;
+    bool compensate_friction_;
+    double static_eps_;
 
     // RTT Ports
     RTT::InputPort<Eigen::VectorXd> joint_position_in_;
@@ -69,7 +73,9 @@ namespace lcsr_controllers {
       joint_velocity_,
       joint_velocity_raw_,
       joint_velocity_cmd_,
-      joint_effort_;
+      joint_effort_,
+      static_effort_,
+      static_deadband_;
 
     bool has_last_position_data_;
 
