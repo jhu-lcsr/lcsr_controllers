@@ -229,6 +229,7 @@ void IDControllerKDL::updateHook()
           torques_) != 0)
     {
       RTT::log(RTT::Error) << "Could not compute joint torques!" << RTT::endlog();
+      this->error();
     }
 
     // Store the effort command

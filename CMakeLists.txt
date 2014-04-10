@@ -43,9 +43,13 @@ link_directories(
   ${orocos_kdl_LIBRARY_DIRS}
   ${USE_OROCOS_LIBRARY_DIRS})
 
+add_library(lcsr_controllers_friction
+  src/friction/joint_friction_compensator_hss.cpp)
+
 orocos_component(${PROJECT_NAME}
   src/lcsr_controllers.cpp
   src/joint_pid_controller.cpp
+  src/joint_setpoint.cpp
   src/id_controller_kdl.cpp
   src/ik_controller.cpp # new inverse kinematics controller
   src/joint_traj_generator_kdl.cpp
@@ -56,6 +60,7 @@ orocos_component(${PROJECT_NAME}
 
 target_link_libraries(
   ${PROJECT_NAME}
+  lcsr_controllers_friction
   ${orocos_kdl_LIBRARIES}
   ${USE_OROCOS_LIBRARIES} 
   ${catkin_LIBRARIES})

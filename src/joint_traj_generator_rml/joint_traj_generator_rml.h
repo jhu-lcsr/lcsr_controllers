@@ -51,6 +51,7 @@ namespace lcsr_controllers {
       max_accelerations_,
       max_jerks_;
     bool verbose_;
+    bool stop_on_violation_;
 
   protected:
     // RTT Ports
