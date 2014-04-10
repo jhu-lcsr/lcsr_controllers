@@ -1,4 +1,3 @@
-
 Friction Compensators
 =====================
 
@@ -6,7 +5,7 @@ Friction Compensators
 
 ## Hysteresis Stick-Slip (HSS) Friction Compensator
 
-~[](hysteresis.png)
+![](hysteresis.png)
 
 ### Usage
 
