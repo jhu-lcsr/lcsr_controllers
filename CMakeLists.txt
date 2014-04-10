@@ -18,7 +18,10 @@ find_package(Eigen REQUIRED)
 
 # Generate ROS messages
 add_message_files(FILES
-  SemiAbsoluteCalibrationState.msg)
+  SemiAbsoluteCalibrationState.msg
+  Insertia.msg
+  InsertiaStamped.msg
+  AttachedInertia.msg)
 add_service_files(FILES
   Calibrate.srv)
 generate_messages(DEPENDENCIES std_msgs)
