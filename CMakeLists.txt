@@ -43,6 +43,7 @@ link_directories(
 orocos_component(${PROJECT_NAME}
   src/lcsr_controllers.cpp
   src/joint_pid_controller.cpp
+  src/joint_setpoint.cpp
   src/id_controller_kdl.cpp
   src/ik_controller.cpp # new inverse kinematics controller
   src/joint_traj_generator_kdl.cpp

@@ -8,11 +8,11 @@
 
 #include <kdl_parser/kdl_parser.hpp>
 
-#include <rtt_rosparam/rosparam.h>
-
 #include <kdl_urdf_tools/tools.h>
 #include "joint_pid_controller.h"
 
+#include <rtt_rosparam/rosparam.h>
+#include <rtt_roscomm/rtt_rostopic.h>
 #include <rtt_rosclock/rtt_rosclock.h>
 
 using namespace lcsr_controllers;
@@ -24,10 +24,12 @@ JointPIDController::JointPIDController(std::string const& name) :
   ,robot_description_param_("/robot_description")
   ,root_link_("")
   ,tip_link_("")
+  ,tolerance_violations_(0)
   // Working variables
   ,n_dof_(0)
   ,kdl_tree_()
   ,kdl_chain_()
+  ,ros_publish_throttle_(0.02)
 {
   // Declare properties
   this->addProperty("robot_description",robot_description_).doc("The WAM URDF xml string.");
@@ -38,7 +40,9 @@ JointPIDController::JointPIDController(std::string const& name) :
   this->addProperty("i_gains",i_gains_).doc("Integral gains.");
   this->addProperty("d_gains",d_gains_).doc("Derivative gains.");
   this->addProperty("i_clamps",i_clamps_).doc("Integral clamps.");
-  this->addProperty("velocity_smoothing_factor",velocity_smoothing_factor_).doc("Exponential smoothing factor to use when estimating veolocity from finite differences.");
+  this->addProperty("position_tolerance",position_tolerance_).doc("Maximum position error.");
+  this->addProperty("velocity_tolerance",velocity_tolerance_).doc("Maximum velocity error.");
+  this->addProperty("tolerance_violations",tolerance_violations_).doc("Number of position or velocity tolerance violations.");
   
   // Configure data ports
   this->ports()->addPort("joint_position_in", joint_position_in_);
@@ -49,6 +53,7 @@ JointPIDController::JointPIDController(std::string const& name) :
     .doc("Output port: nx1 vector of joint torques. (n joints)");
 
   // ROS ports
+  this->ports()->addPort("joint_state_desired_out", joint_state_desired_out_);
 
   // Load Conman interface
   conman_hook_ = conman::Hook::GetHook(this);
@@ -82,6 +87,26 @@ bool JointPIDController::configureHook()
     RTT::log(RTT::Error) << "Could not initialize robot kinematics with root: \"" <<root_link_<< "\" and tip: \"" <<tip_link_<< "\"" << RTT::endlog();
     return false;
   }
+  
+  // Get joint names
+  joint_state_desired_.name.clear();
+  joint_state_desired_.name.reserve(n_dof_);
+  for(std::vector<KDL::Segment>::iterator it = kdl_chain_.segments.begin();
+      it != kdl_chain_.segments.end();
+      ++it)
+  {
+    joint_state_desired_.name.push_back(it->getJoint().getName());
+  }
+
+  // ROS topics
+  if(!joint_state_desired_out_.createStream(rtt_roscomm::topic("~" + this->getName() + "/joint_state_desired")))
+  {
+    RTT::log(RTT::Error) << "ROS Topics could not be streamed..." <<RTT::endlog();
+    return false;
+  }
+
+  position_tolerance_.conservativeResize(n_dof_);
+  velocity_tolerance_.conservativeResize(n_dof_);
 
   // Resize IO vectors
   joint_position_cmd_.resize(n_dof_);
@@ -106,7 +131,8 @@ bool JointPIDController::configureHook()
   rosparam->getComponentPrivate("i_gains");
   rosparam->getComponentPrivate("d_gains");
   rosparam->getComponentPrivate("i_clamps");
-  rosparam->getComponentPrivate("velocity_smoothing_factor");
+  rosparam->getComponentPrivate("position_tolerance");
+  rosparam->getComponentPrivate("velocity_tolerance");
 
   // Prepare ports for realtime processing
   joint_effort_out_.setDataSample(joint_effort_);
@@ -183,15 +209,56 @@ void JointPIDController::updateHook()
     .max(i_clamps_.array())
     .min(-i_clamps_.array());
 
-  // Compute the command
-  joint_effort_ = (
-      p_gains_.array()*joint_p_error_.array()
-      + i_gains_.array()*joint_i_error_.array()                  
-      + d_gains_.array()*joint_d_error_.array()
-      ).matrix();
+  // Determine if any of the joint tolerances have been violated (this means we need to recompute the traj)
+  int current_tolerance_violations = 0;
+  for(int i=0; i<n_dof_; i++) 
+  {
+    if(fabs(joint_p_error_(i)) > position_tolerance_(i)) {
+      //if(verbose_) RTT::log(RTT::Debug) << "Joint " << i << " position error tolerance violated ("<<position_tracking_error<<" > "<<position_tolerance_[i]<<")" << RTT::endlog(); 
+      current_tolerance_violations++;
+    }
+    if(fabs(joint_d_error_(i)) > velocity_tolerance_(i))  {
+      //if(verbose_) RTT::log(RTT::Debug) << "Joint " << i << " velocity error tolerance violated ("<<velocity_tracking_error<<" > "<<velocity_tolerance_[i]<<")" << RTT::endlog(); 
+      current_tolerance_violations++;
+    }
+  }
+
+  if(current_tolerance_violations > 0) {
+    if(tolerance_violations_ == 0) {
+      RTT::log(RTT::Warning) << "PID tolerances violated by current command. (This warning will only be printed once until the command returns to within tolerances.)" << RTT::endlog();
+    }
+    tolerance_violations_ += current_tolerance_violations;
+    joint_effort_.setZero();
+  } else {
+    // Compute the command
+    joint_effort_ = (
+        p_gains_.array()*joint_p_error_.array()
+        + i_gains_.array()*joint_i_error_.array()                  
+        + d_gains_.array()*joint_d_error_.array()
+        ).matrix();
+    
+    // Check for old tolerance violations
+    if(tolerance_violations_ > 0) {
+      RTT::log(RTT::Warning) << "PID command is now within tolerances." << RTT::endlog();
+      // Reset violations
+      tolerance_violations_ = 0;
+    }
+  }
 
   // Send joint efforts
   joint_effort_out_.write(joint_effort_);
+
+  // Publish debug traj to ros
+  if(ros_publish_throttle_.ready(0.02)) 
+  {
+    // Publish controller desired state
+    joint_state_desired_.header.stamp = rtt_rosclock::host_now();
+    joint_state_desired_.position.resize(n_dof_);
+    joint_state_desired_.velocity.resize(n_dof_);
+    std::copy(joint_position_cmd_.data(), joint_position_cmd_.data() + n_dof_, joint_state_desired_.position.begin());
+    std::copy(joint_velocity_cmd_.data(), joint_velocity_cmd_.data() + n_dof_, joint_state_desired_.velocity.begin());
+    joint_state_desired_out_.write(joint_state_desired_);
+  }
 }
 
 void JointPIDController::stopHook()

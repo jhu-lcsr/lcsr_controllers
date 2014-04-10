@@ -36,7 +36,8 @@ JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
   // Trajectory state
   ,segments_()
   ,active_segment_(0,false)
-  // Debuggin
+  // Debugging
+  ,stop_on_violation_(true)
   ,ros_publish_throttle_(0.02)
 {
   // Declare properties
@@ -51,6 +52,7 @@ JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
   this->addProperty("position_tolerance",position_tolerance_).doc("Maximum position error.");
   this->addProperty("velocity_tolerance",velocity_tolerance_).doc("Maximum velocity error.");
   this->addProperty("sampling_resolution",sampling_resolution_).doc("Sampling resolution in seconds.");
+  this->addProperty("stop_on_violation",stop_on_violation_).doc("Stop the trajectory if the tolerances are violated.");
   this->addProperty("verbose",verbose_).doc("Verbose debug output control.");
   
   // Configure data ports
@@ -481,17 +483,31 @@ bool JointTrajGeneratorRML::sampleTrajectory(
       // initial state. This allows us to send and re-send setpoints to the
       // generator really quickly.
       if(tolerances_violated) {
-        rml_in->SetCurrentPositionVectorElement(joint_position(i), i);
-        rml_in->SetCurrentVelocityVectorElement(joint_velocity(i), i);
-        rml_in->SetCurrentAccelerationVectorElement(joint_acceleration(i), i);
+        if(stop_on_violation_) {
+          rml_in->SetCurrentPositionVectorElement(joint_position(i), i);
+          rml_in->SetCurrentVelocityVectorElement(0.0, i);
+          rml_in->SetCurrentAccelerationVectorElement(0.0, i);
+
+          active_segment.goal_positions(i) = joint_position(i);
+          active_segment.goal_velocities(i) = 0.0;
+
+          segments.clear();
+        } else {
+          rml_in->SetCurrentPositionVectorElement(joint_position(i), i);
+          rml_in->SetCurrentVelocityVectorElement(0.0, i);
+          rml_in->SetCurrentAccelerationVectorElement(0.0, i);
+        }
+
+        rml_in->SetTargetPositionVectorElement(active_segment.goal_positions(i), i);
+        rml_in->SetTargetVelocityVectorElement(active_segment.goal_velocities(i), i);
       } else {
         rml_in->SetCurrentPositionVectorElement( rml_out->GetNewPositionVectorElement(i), i);
         rml_in->SetCurrentVelocityVectorElement( rml_out->GetNewVelocityVectorElement(i), i);
         rml_in->SetCurrentAccelerationVectorElement( rml_out->GetNewAccelerationVectorElement(i), i);
-      }
 
-      rml_in->SetTargetPositionVectorElement(active_segment.goal_positions(i), i);
-      rml_in->SetTargetVelocityVectorElement(active_segment.goal_velocities(i), i);
+        rml_in->SetTargetPositionVectorElement(active_segment.goal_positions(i), i);
+        rml_in->SetTargetVelocityVectorElement(active_segment.goal_velocities(i), i);
+      }
 
       // Enable this joint
       rml_in->SetSelectionVectorElement(true,i);
@@ -692,6 +708,7 @@ void JointTrajGeneratorRML::updateHook()
     return;
   }
 
+  //joint_velocity_ = 0.98*joint_velocity_last_ + 0.02*joint_velocity_;
   joint_acceleration_ = 0.1*joint_acceleration_ + 0.9*(joint_velocity_ - joint_velocity_last_);
   joint_velocity_last_ = joint_velocity_;
 
