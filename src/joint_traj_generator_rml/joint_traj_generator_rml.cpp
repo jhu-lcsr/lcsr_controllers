@@ -187,6 +187,9 @@ bool JointTrajGeneratorRML::configureHook()
   joint_acceleration_.resize(n_dof_);
   joint_acceleration_sample_.resize(n_dof_);
 
+  position_tolerance_violations_.assign(n_dof_,false);
+  velocity_tolerance_violations_.assign(n_dof_,false);
+
   index_permutation_.resize(n_dof_);
   active_segment_ = TrajSegment(n_dof_,false);
 
@@ -359,7 +362,9 @@ bool JointTrajGeneratorRML::sampleTrajectory(
     JointTrajGeneratorRML::TrajSegment &active_segment,
     Eigen::VectorXd &joint_position_sample,
     Eigen::VectorXd &joint_velocity_sample,
-    Eigen::VectorXd &joint_acceleration_sample) const
+    Eigen::VectorXd &joint_acceleration_sample,
+    std::vector<bool> &position_tolerance_violations,
+    std::vector<bool> &velocity_tolerance_violations) const
 {
   if( joint_position.size() != n_dof_ ||
       joint_velocity.size() != n_dof_ ||
@@ -442,14 +447,27 @@ bool JointTrajGeneratorRML::sampleTrajectory(
     double velocity_tracking_error = std::abs(rml_out->GetNewVelocityVectorElement(i) - joint_velocity[i]);
 
     if(position_tracking_error > position_tolerance_[i]) {
-      if(verbose_) RTT::log(RTT::Debug) << "Joint " << i << " position error tolerance violated ("<<position_tracking_error<<" > "<<position_tolerance_[i]<<")" << RTT::endlog(); 
       tolerances_violated = true;
       recompute_trajectory = true;
+
+      if(verbose_ && !position_tolerance_violations[i]) {
+        RTT::log(RTT::Warning) << "Joint " << i << " position error tolerance violated ("<<position_tracking_error<<" > "<<position_tolerance_[i]<<")" << RTT::endlog(); 
+        position_tolerance_violations[i] = true;
+      }
+    } else if(position_tolerance_violations[i]) {
+      position_tolerance_violations[i] = false;
     }
+
     if(velocity_tracking_error > velocity_tolerance_[i])  {
-      if(verbose_) RTT::log(RTT::Debug) << "Joint " << i << " velocity error tolerance violated ("<<velocity_tracking_error<<" > "<<velocity_tolerance_[i]<<")" << RTT::endlog(); 
       tolerances_violated = true;
       recompute_trajectory = true;
+
+      if(verbose_ && !velocity_tolerance_violations[i]) {
+        RTT::log(RTT::Warning) << "Joint " << i << " velocity error tolerance violated ("<<velocity_tracking_error<<" > "<<velocity_tolerance_[i]<<")" << RTT::endlog(); 
+        velocity_tolerance_violations[i] = true;
+      }
+    } else if(velocity_tolerance_violations[i]) {
+      velocity_tolerance_violations[i] = false;
     }
   }
 
@@ -484,6 +502,7 @@ bool JointTrajGeneratorRML::sampleTrajectory(
       // generator really quickly.
       if(tolerances_violated) {
         if(stop_on_violation_) {
+          // TODO: test this
           rml_in->SetCurrentPositionVectorElement(joint_position(i), i);
           rml_in->SetCurrentVelocityVectorElement(0.0, i);
           rml_in->SetCurrentAccelerationVectorElement(0.0, i);
@@ -817,7 +836,8 @@ void JointTrajGeneratorRML::updateHook()
         joint_position_, joint_velocity_, joint_acceleration_,
         rml_, rml_in_, rml_out_, rml_flags_,
         segments_, active_segment_,
-        joint_position_sample_, joint_velocity_sample_, joint_acceleration_sample_);
+        joint_position_sample_, joint_velocity_sample_, joint_acceleration_sample_,
+        position_tolerance_violations_, velocity_tolerance_violations_);
 
   } catch (std::runtime_error &err) {
 

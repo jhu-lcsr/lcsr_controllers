@@ -163,7 +163,9 @@ namespace lcsr_controllers {
         JointTrajGeneratorRML::TrajSegment &active_segment,
         Eigen::VectorXd &joint_position_sample,
         Eigen::VectorXd &joint_velocity_sample,
-        Eigen::VectorXd &joint_acceleration_sample) const;
+        Eigen::VectorXd &joint_acceleration_sample,
+        std::vector<bool> &position_tolerance_violations,
+        std::vector<bool> &velocity_tolerance_violations) const;
 
     //! Output information about some RML input parameters
     static void RMLLog(
@@ -263,6 +265,9 @@ namespace lcsr_controllers {
     trajectory_msgs::JointTrajectory joint_traj_cmd_;
     sensor_msgs::JointState joint_state_desired_;
     rtt_ros_tools::PeriodicThrottle ros_publish_throttle_;
+
+    std::vector<bool> position_tolerance_violations_;
+    std::vector<bool> velocity_tolerance_violations_;
 
     // Conman interface
     boost::shared_ptr<conman::Hook> conman_hook_;

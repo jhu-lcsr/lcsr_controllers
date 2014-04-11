@@ -9,6 +9,8 @@ find_package(catkin REQUIRED
   rtt_ros_tools
   kdl_urdf_tools
   kdl_conversions
+  std_msgs
+  geometry_msgs
   control_msgs
   control_toolbox
   reflexxes_type2)
@@ -18,13 +20,10 @@ find_package(Eigen REQUIRED)
 
 # Generate ROS messages
 add_message_files(FILES
-  SemiAbsoluteCalibrationState.msg
-  Insertia.msg
-  InsertiaStamped.msg
-  AttachedInertia.msg)
+  SemiAbsoluteCalibrationState.msg)
 add_service_files(FILES
   Calibrate.srv)
-generate_messages(DEPENDENCIES std_msgs)
+generate_messages(DEPENDENCIES std_msgs geometry_msgs)
 catkin_package()
 
 # Generate RTT typekit

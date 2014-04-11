@@ -71,6 +71,9 @@ IDControllerKDL::IDControllerKDL(std::string const& name) :
 
   this->ports()->addPort("cogs_debug_out", cogs_debug_out_);
   cogs_debug_out_.createStream(rtt_roscomm::topicBuffer("~/"+this->getName()+"/cogs",32));
+
+  this->ports()->addPort("end_effector_inertias_in", end_effector_inertias_in_);
+  end_effector_inertias_in_.createStream(rtt_roscomm::topic("~/"+this->getName()+"/end_effector_inertias"));
 }
 
 bool IDControllerKDL::configureHook()
@@ -188,6 +191,23 @@ void IDControllerKDL::updateHook()
       ee_mass += new_mass;
       new_ee_data = true;
     }
+  }
+
+  while(end_effector_inertias_in_.read( end_effector_inertia_ ) == RTT::NewData) 
+  {
+#if 0 // TODO
+    // Make sure the new mass is well-posed
+    if(end_effector_mass_.size() == 4 && end_effector_mass_[3] > 1E-4) 
+    {
+      // Update EE cog
+      KDL::Vector new_cog(end_effector_mass_[0], end_effector_mass_[1], end_effector_mass_[2]);
+      double new_mass = end_effector_mass_[3];
+      ee_cog = (ee_cog*ee_mass + new_cog*new_mass) / (ee_mass + new_mass);
+      // Update EE mass
+      ee_mass += new_mass;
+      new_ee_data = true;
+    }
+#endif 
   }
 
   // Update the ee inertia

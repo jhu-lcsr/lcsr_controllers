@@ -18,6 +18,7 @@
 
 #include <geometry_msgs/WrenchStamped.h>
 #include <visualization_msgs/Marker.h>
+#include <telemanip_msgs/AttachedInertia.h>
 
 namespace lcsr_controllers {
   class IDControllerKDL : public RTT::TaskContext
@@ -34,6 +35,8 @@ namespace lcsr_controllers {
     RTT::InputPort<Eigen::VectorXd> joint_position_in_;
     RTT::InputPort<Eigen::VectorXd> joint_velocity_in_;
     RTT::InputPort<Eigen::VectorXd> end_effector_masses_in_;
+    RTT::InputPort<telemanip_msgs::AttachedInertia> end_effector_inertias_in_;
+
     RTT::OutputPort<Eigen::VectorXd> joint_effort_out_;
 
     RTT::OutputPort<geometry_msgs::WrenchStamped> ext_wrenches_debug_out_;
@@ -80,6 +83,7 @@ namespace lcsr_controllers {
 
     rtt_ros_tools::PeriodicThrottle debug_throttle_;
     bool compensate_end_effector_;
+    telemanip_msgs::AttachedInertia end_effector_inertia_;
   };
 }
 
