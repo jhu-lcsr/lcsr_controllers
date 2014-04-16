@@ -178,7 +178,7 @@ void IDControllerKDL::updateHook()
   double ee_mass = 0;
   KDL::Vector ee_cog(0,0,0);
 
-  while(end_effector_masses_in_.read( end_effector_mass_ ) == RTT::NewData) 
+  if(end_effector_masses_in_.readNewest( end_effector_mass_ ) == RTT::NewData) 
   {
     // Make sure the new mass is well-posed
     if(end_effector_mass_.size() == 4 && end_effector_mass_[3] > 1E-4) 

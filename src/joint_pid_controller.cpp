@@ -1,4 +1,3 @@
-
 #include <iostream>
 #include <map>
 
@@ -34,6 +33,7 @@ JointPIDController::JointPIDController(std::string const& name) :
   ,ros_publish_throttle_(0.02)
   ,compensate_friction_(false)
   ,static_eps_(0.0)
+  ,verbose_(false)
 {
   // Declare properties
   this->addProperty("robot_description",robot_description_).doc("The WAM URDF xml string.");
@@ -51,6 +51,7 @@ JointPIDController::JointPIDController(std::string const& name) :
   this->addProperty("static_effort",static_effort_).doc("Static friction effort.");
   this->addProperty("static_deadband",static_deadband_).doc("Static friction deadband.");
   this->addProperty("static_eps",static_eps_).doc("Static friction velocity deadband.");
+  this->addProperty("verbose",verbose_).doc("Verbose output.");
   
   // Configure data ports
   this->ports()->addPort("joint_position_in", joint_position_in_);
@@ -223,19 +224,19 @@ void JointPIDController::updateHook()
   joint_d_error_ = joint_velocity_cmd_ - joint_velocity_;
   joint_i_error_ = 
     (joint_i_error_ + period*joint_p_error_).array()
-    .max(i_clamps_.array())
-    .min(-i_clamps_.array());
+    .max(-i_clamps_.array())
+    .min(i_clamps_.array());
 
   // Determine if any of the joint tolerances have been violated (this means we need to recompute the traj)
   int current_tolerance_violations = 0;
   for(int i=0; i<n_dof_; i++) 
   {
     if(fabs(joint_p_error_(i)) > position_tolerance_(i)) {
-      //if(verbose_) RTT::log(RTT::Debug) << "Joint " << i << " position error tolerance violated ("<<position_tracking_error<<" > "<<position_tolerance_[i]<<")" << RTT::endlog(); 
+      if(verbose_) RTT::log(RTT::Warning) << "Joint " << i << " position error tolerance violated ("<<fabs(joint_p_error_[i])<<" > "<<position_tolerance_[i]<<")" << RTT::endlog(); 
       current_tolerance_violations++;
     }
     if(fabs(joint_d_error_(i)) > velocity_tolerance_(i))  {
-      //if(verbose_) RTT::log(RTT::Debug) << "Joint " << i << " velocity error tolerance violated ("<<velocity_tracking_error<<" > "<<velocity_tolerance_[i]<<")" << RTT::endlog(); 
+      if(verbose_) RTT::log(RTT::Warning) << "Joint " << i << " velocity error tolerance violated ("<<fabs(joint_d_error_[i])<<" > "<<velocity_tolerance_[i]<<")" << RTT::endlog(); 
       current_tolerance_violations++;
     }
   }

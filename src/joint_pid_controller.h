@@ -38,6 +38,7 @@ namespace lcsr_controllers {
       i_clamps_;
     bool compensate_friction_;
     double static_eps_;
+    bool verbose_;
 
     // RTT Ports
     RTT::InputPort<Eigen::VectorXd> joint_position_in_;
