@@ -11,6 +11,7 @@
 #include <kdl/jntarrayvel.hpp>
 #include <kdl/tree.hpp>
 #include <kdl/chain.hpp>
+#include <kdl/chaindynparam.hpp>
 
 #include <conman/hook.h>
 
@@ -45,6 +46,7 @@ namespace lcsr_controllers {
     RTT::InputPort<Eigen::VectorXd> joint_velocity_in_;
     RTT::InputPort<Eigen::VectorXd> joint_position_cmd_in_;
     RTT::InputPort<Eigen::VectorXd> joint_velocity_cmd_in_;
+    RTT::InputPort<Eigen::VectorXd> joint_acceleration_cmd_in_;
     RTT::OutputPort<Eigen::VectorXd> joint_effort_out_;
     RTT::OutputPort<sensor_msgs::JointState> joint_state_desired_out_;
 
@@ -66,6 +68,7 @@ namespace lcsr_controllers {
     // State
     Eigen::VectorXd 
       joint_p_error_,
+      joint_p_error_last_,
       joint_d_error_,
       joint_i_error_,
       joint_position_,
@@ -74,6 +77,7 @@ namespace lcsr_controllers {
       joint_velocity_,
       joint_velocity_raw_,
       joint_velocity_cmd_,
+      joint_acceleration_cmd_,
       joint_effort_,
       static_effort_,
       static_deadband_;
@@ -85,6 +89,9 @@ namespace lcsr_controllers {
 
     sensor_msgs::JointState joint_state_desired_;
     rtt_ros_tools::PeriodicThrottle ros_publish_throttle_;
+
+    boost::scoped_ptr<KDL::ChainDynParam> chain_dynamics_;
+    KDL::JntSpaceInertiaMatrix joint_inertia_;
   };
 }
 
