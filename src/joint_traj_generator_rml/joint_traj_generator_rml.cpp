@@ -66,6 +66,8 @@ JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
     .doc("Interpolated joint position subject to velocity and acceleration limits.");
   this->ports()->addPort("joint_velocity_out", joint_velocity_out_)
     .doc("Interpolated joint velocity subject to velocity and acceleration limits.");
+  this->ports()->addPort("joint_acceleration_out", joint_acceleration_out_)
+    .doc("Interpolated joint acceleration subject to velocity and acceleration limits.");
 
   this->addOperation("setMaxVelocity",&JointTrajGeneratorRML::setMaxVelocity,this,RTT::OwnThread);
   this->addOperation("setMaxAcceleration",&JointTrajGeneratorRML::setMaxAcceleration,this,RTT::OwnThread);
@@ -451,7 +453,7 @@ bool JointTrajGeneratorRML::sampleTrajectory(
       recompute_trajectory = true;
 
       if(verbose_ && !position_tolerance_violations[i]) {
-        RTT::log(RTT::Warning) << "Joint " << i << " position error tolerance violated ("<<position_tracking_error<<" > "<<position_tolerance_[i]<<")" << RTT::endlog(); 
+        RTT::log(RTT::Warning) << "["<<this->getName() <<"] Joint " << i << " position error tolerance violated ("<<position_tracking_error<<" > "<<position_tolerance_[i]<<")" << RTT::endlog(); 
         position_tolerance_violations[i] = true;
       }
     } else if(position_tolerance_violations[i]) {
@@ -463,7 +465,7 @@ bool JointTrajGeneratorRML::sampleTrajectory(
       recompute_trajectory = true;
 
       if(verbose_ && !velocity_tolerance_violations[i]) {
-        RTT::log(RTT::Warning) << "Joint " << i << " velocity error tolerance violated ("<<velocity_tracking_error<<" > "<<velocity_tolerance_[i]<<")" << RTT::endlog(); 
+        RTT::log(RTT::Warning) << "["<<this->getName() <<"] Joint " << i << " velocity error tolerance violated ("<<velocity_tracking_error<<" > "<<velocity_tolerance_[i]<<")" << RTT::endlog(); 
         velocity_tolerance_violations[i] = true;
       }
     } else if(velocity_tolerance_violations[i]) {
@@ -858,6 +860,7 @@ void JointTrajGeneratorRML::updateHook()
     // Send instantaneous joint position and velocity commands
     joint_position_out_.write(joint_position_sample_);
     joint_velocity_out_.write(joint_velocity_sample_);
+    joint_acceleration_out_.write(joint_acceleration_sample_);
 
     // Compute error
     joint_position_err_ = joint_position_sample_ - joint_position_;

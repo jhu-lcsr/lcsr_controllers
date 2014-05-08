@@ -74,6 +74,16 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
     .doc("The tip link for the controller. Cartesian pose commands are applied to this frame.");
   this->addProperty("target_frame",target_frame_)
     .doc("The name of the target TF frame if tf is to be used. Leave blank to disable this.");
+  
+  this->addOperation("printH",&JTNullspaceController::printH,this);
+
+  this->addProperty("dur_get_data_",dur_get_data_);
+  this->addProperty("dur_compute_wrench_",dur_compute_wrench_);
+  this->addProperty("dur_compute_jac_",dur_compute_jac_);
+  this->addProperty("dur_compute_eff_",dur_compute_eff_);
+  this->addProperty("dur_compute_nullspace_",dur_compute_nullspace_);
+  this->addProperty("dur_compute_damping_",dur_compute_damping_);
+  this->addProperty("dur_compute_singularity_avoidance_",dur_compute_singularity_avoidance_);
 
   this->addProperty("manipulability",manipulability_);
   this->addProperty("singularity_avoidance_gain",singularity_avoidance_gain_);
@@ -107,6 +117,7 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   // Configure data ports
   this->ports()->addPort("joint_position_in", joint_position_in_);
   this->ports()->addPort("joint_velocity_in", joint_velocity_in_);
+  this->ports()->addPort("joint_posture_in", joint_posture_in_);
   this->ports()->addPort("pose_twist_in", pose_twist_in_);
   this->ports()->addPort("joint_effort_out", joint_effort_out_);
 
@@ -226,8 +237,17 @@ void JTNullspaceController::updateHook()
   // Read in the current joint positions & velocities
   bool new_pos_data = joint_position_in_.readNewest( joint_position_ ) == RTT::NewData;
   bool new_vel_data = joint_velocity_in_.readNewest( joint_velocity_ ) == RTT::NewData;
+  //bool new_posture_data = joint_posture_in_.readNewest( joint_posture_ ) == RTT::NewData;
+
+  RTT::os::TimeService *ts =  RTT::os::TimeService::Instance();
+
+  RTT::os::TimeService::ticks zero = 0;
+  RTT::os::TimeService::ticks tic;
 
   if(new_pos_data && new_vel_data) {
+
+    tic = ts->getTicks();
+
     // Get JntArray structures from pos/vel
     positions_.data = joint_position_;
     velocities_.data = joint_velocity_;
@@ -239,7 +259,8 @@ void JTNullspaceController::updateHook()
     RTT::FlowStatus ros_status = pose_desired_in_.readNewest(pose_msg_);
     RTT::FlowStatus rtt_status = pose_twist_in_.readNewest(framevel_desired_);
 
-    if(ros_status == RTT::NewData) {
+    if(ros_status == RTT::NewData) 
+    {
       KDL::Frame frame;
       tf::poseMsgToKDL(pose_msg_.pose, frame);
       framevel_desired_.M.R = frame.M;
@@ -247,7 +268,8 @@ void JTNullspaceController::updateHook()
       framevel_desired_.p.p = frame.p;
       framevel_desired_.p.v = KDL::Vector::Zero();
     } 
-    else if(target_frame_.length() > 0) {
+    else if(target_frame_.length() > 0) 
+    {
       if(tf_.canTransform(root_link_,target_frame_)) {
         geometry_msgs::TransformStamped tform_msg = tf_.lookupTransform(root_link_,target_frame_);
         KDL::Frame frame;
@@ -266,8 +288,12 @@ void JTNullspaceController::updateHook()
       return;
     }
 
+    dur_get_data_ = ts->secondsSince(tic);
+    tic = ts->getTicks();
+
     // Compute forward kinematics of current pose
     // framevel_ is in the base_link coordinate frame
+
     fk_solver_vel_->JntToCart(posvel_, framevel_);
 
     // Compute the cartesian position and velocity error
@@ -299,6 +325,9 @@ void JTNullspaceController::updateHook()
     wrench_.segment<3>(0) = linear_p_gain_*p_err + linear_d_gain_*v_err;
     wrench_.segment<3>(3) = angular_p_gain_*r_err + angular_d_gain_*w_err;
 
+    dur_compute_wrench_ = ts->secondsSince(tic);
+    tic = ts->getTicks();
+
     // Handy typedefs
     typedef Eigen::Matrix<double, 6, 6> Matrix6d;
     typedef Eigen::Matrix<double, 6, Eigen::Dynamic> Matrix6Jd;
@@ -314,8 +343,14 @@ void JTNullspaceController::updateHook()
     Matrix6Jd J = jacobian_.data;
     MatrixJ6d J_t = J.transpose();
 
+    dur_compute_jac_ = ts->secondsSince(tic);
+    tic = ts->getTicks();
+
     // Compute the primary effort
     joint_effort_raw_ = J_t*wrench_;
+
+    dur_compute_eff_ = ts->secondsSince(tic);
+    tic = ts->getTicks();
 
     {
       // Compute nullspace effort (to be projected)
@@ -331,19 +366,26 @@ void JTNullspaceController::updateHook()
       Eigen::MatrixXd H_inv = H.inverse();
 
       // Compute dynamically-consistent pseudoinverse
-      Matrix6d L = (J * H_inv * J_t).inverse();
+      Matrix6Jd L = (J * H_inv * J_t).inverse() * J * H_inv;
 
       // Compute nullspace projector
       MatrixJJd eye = MatrixJJd::Identity(n_dof_,n_dof_);
-      MatrixJJd N = eye - J_t * L * J * H_inv;
-      
+      MatrixJJd N = eye - J_t * L;
+
+      dur_compute_nullspace_ = ts->secondsSince(tic);
+      tic = ts->getTicks();
+
       // Nullspace damping term //////////////////////////////////////////////////////////////////////
       {
         joint_effort_null_ += -1.0 * (joint_d_gains_.array() * joint_velocity_.array()).matrix();
       }
 
+      dur_compute_damping_ = ts->secondsSince(tic);
+      tic = ts->getTicks();
+
       // Singularity avoidance term //////////////////////////////////////////////////////////////////
       // Yoshikawa, 1984: "Analysis and Control of Robot Manipulators with Redundancy" ///////////////
+      if(singularity_avoidance_gain_ > 0.001)
       {
         // Compute manipulability
         Matrix6d G = J*J_t;
@@ -369,7 +411,7 @@ void JTNullspaceController::updateHook()
 
           for(unsigned i=0; i<6; i++) {
             for(unsigned j=0; j<6; j++) {
-              joint_effort_null_(l) = 
+              joint_effort_null_(l) += 
                 0.5*
                 singularity_avoidance_gain_*
                 manipulability_*
@@ -379,6 +421,9 @@ void JTNullspaceController::updateHook()
           }
         }
       }
+
+      dur_compute_singularity_avoidance_ = ts->secondsSince(tic);
+      tic = ts->getTicks();
 
       joint_effort_raw_ += N*joint_effort_null_;
     }

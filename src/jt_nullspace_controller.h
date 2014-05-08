@@ -44,6 +44,7 @@ namespace lcsr_controllers {
     RTT::InputPort<Eigen::VectorXd> joint_position_in_;
     RTT::InputPort<Eigen::VectorXd> joint_velocity_in_;
     RTT::InputPort<KDL::FrameVel> pose_twist_in_;
+    RTT::InputPort<Eigen::VectorXd> joint_posture_in_;
     RTT::OutputPort<Eigen::VectorXd> joint_effort_out_;
 
     RTT::InputPort<geometry_msgs::PoseStamped> pose_desired_in_;
@@ -59,6 +60,19 @@ namespace lcsr_controllers {
     virtual void cleanupHook();
 
   private:
+
+    void printH()
+    {
+      if(chain_dynamics_->JntToMass(positions_, joint_inertia_) != 0) {
+        RTT::log(RTT::Error) << "Could not compute joint space inertia." << RTT::endlog();
+        return;
+      }
+      Eigen::MatrixXd H = (joint_inertia_.data); // + (eye + d_gain).inverse() * motor_inertia 
+      Eigen::MatrixXd H_inv = H.inverse();
+
+      RTT::log(RTT::Info) << "H: " << H << RTT::endlog();
+      RTT::log(RTT::Info) << "Hinv: " << H_inv << RTT::endlog();
+    }
 
     // Kinematic properties
     unsigned int n_dof_;
@@ -111,6 +125,7 @@ namespace lcsr_controllers {
       joint_effort_raw_,
       joint_effort_null_,
       joint_d_gains_,
+      joint_p_gains_,
       joint_limits_min_,
       joint_limits_max_,
       joint_limits_center_;
@@ -122,6 +137,15 @@ namespace lcsr_controllers {
     rtt_ros_tools::PeriodicThrottle debug_throttle_;
 
     rtt_tf::TFInterface tf_;
+
+    RTT::Seconds
+      dur_get_data_,
+      dur_compute_wrench_,
+      dur_compute_jac_,
+      dur_compute_eff_,
+      dur_compute_nullspace_,
+      dur_compute_damping_,
+      dur_compute_singularity_avoidance_;
   };
 }
 

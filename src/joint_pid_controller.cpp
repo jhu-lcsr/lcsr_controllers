@@ -1,4 +1,3 @@
-
 #include <iostream>
 #include <map>
 
@@ -34,6 +33,8 @@ JointPIDController::JointPIDController(std::string const& name) :
   ,ros_publish_throttle_(0.02)
   ,compensate_friction_(false)
   ,static_eps_(0.0)
+  ,verbose_(false)
+  ,chain_dynamics_(NULL)
 {
   // Declare properties
   this->addProperty("robot_description",robot_description_).doc("The WAM URDF xml string.");
@@ -51,6 +52,7 @@ JointPIDController::JointPIDController(std::string const& name) :
   this->addProperty("static_effort",static_effort_).doc("Static friction effort.");
   this->addProperty("static_deadband",static_deadband_).doc("Static friction deadband.");
   this->addProperty("static_eps",static_eps_).doc("Static friction velocity deadband.");
+  this->addProperty("verbose",verbose_).doc("Verbose output.");
   
   // Configure data ports
   this->ports()->addPort("joint_position_in", joint_position_in_);
@@ -95,6 +97,11 @@ bool JointPIDController::configureHook()
     RTT::log(RTT::Error) << "Could not initialize robot kinematics with root: \"" <<root_link_<< "\" and tip: \"" <<tip_link_<< "\"" << RTT::endlog();
     return false;
   }
+
+  chain_dynamics_.reset(
+      new KDL::ChainDynParam(
+          kdl_chain_, 
+          KDL::Vector(0.0,0.0,0.0)));
   
   // Get joint names
   joint_state_desired_.name.clear();
@@ -117,12 +124,15 @@ bool JointPIDController::configureHook()
   velocity_tolerance_.conservativeResize(n_dof_);
 
   // Resize IO vectors
+  joint_inertia_.resize(n_dof_);
   joint_position_cmd_.resize(n_dof_);
   joint_velocity_cmd_.resize(n_dof_);
+  joint_acceleration_cmd_.resize(n_dof_);
   joint_position_.resize(n_dof_);
   joint_velocity_.resize(n_dof_);
   joint_effort_.resize(n_dof_);
   joint_p_error_.resize(n_dof_);
+  joint_p_error_last_.resize(n_dof_);
   joint_i_error_.resize(n_dof_);
   joint_d_error_.resize(n_dof_);
   p_gains_.resize(n_dof_);
@@ -164,6 +174,7 @@ bool JointPIDController::startHook()
 
   // Zero the errors
   joint_p_error_.setZero();
+  joint_p_error_last_.setZero();
   joint_i_error_.setZero();
   joint_d_error_.setZero();
 
@@ -208,34 +219,44 @@ void JointPIDController::updateHook()
   // These commands can be sparse and not return new information each update tick
   RTT::FlowStatus 
     pos_cmd_status = joint_position_cmd_in_.readNewest( joint_position_cmd_ ), 
-    vel_cmd_status = joint_velocity_cmd_in_.readNewest( joint_velocity_cmd_ );
+    vel_cmd_status = joint_velocity_cmd_in_.readNewest( joint_velocity_cmd_ ),
+    accel_cmd_status = joint_acceleration_cmd_in_.readNewest( joint_acceleration_cmd_ );
 
   if(pos_cmd_status != RTT::NewData || vel_cmd_status != RTT::NewData) {
     return;
   }
 
-  if(joint_position_cmd_.size() != n_dof_ || joint_velocity_cmd_.size() != n_dof_ ) {
+  if(accel_cmd_status != RTT::NewData) {
+    joint_acceleration_cmd_ = Eigen::VectorXd::Zero(n_dof_);
+  }
+
+  if(joint_position_cmd_.size() != n_dof_ || joint_velocity_cmd_.size() != n_dof_ || joint_acceleration_cmd_.size() != n_dof_) {
     this->error();
     return;
   }
 
   joint_p_error_ = joint_position_cmd_ - joint_position_;
-  joint_d_error_ = joint_velocity_cmd_ - joint_velocity_;
+  if(1) {
+    joint_d_error_ = joint_velocity_cmd_ - joint_velocity_;
+  } else {
+    joint_d_error_ = (joint_p_error_ - joint_p_error_last_) / period;
+    joint_p_error_last_ = joint_p_error_;
+  }
   joint_i_error_ = 
-    (joint_i_error_ + period*joint_p_error_).array()
-    .max(i_clamps_.array())
-    .min(-i_clamps_.array());
+    ((joint_i_error_ + period*joint_p_error_).array()
+    .max(-i_clamps_.array()))
+    .min(i_clamps_.array());
 
   // Determine if any of the joint tolerances have been violated (this means we need to recompute the traj)
   int current_tolerance_violations = 0;
   for(int i=0; i<n_dof_; i++) 
   {
     if(fabs(joint_p_error_(i)) > position_tolerance_(i)) {
-      //if(verbose_) RTT::log(RTT::Debug) << "Joint " << i << " position error tolerance violated ("<<position_tracking_error<<" > "<<position_tolerance_[i]<<")" << RTT::endlog(); 
+      if(verbose_) RTT::log(RTT::Warning) << "["<<this->getName() <<"] Joint " << i << " position error tolerance violated ("<<fabs(joint_p_error_[i])<<" > "<<position_tolerance_[i]<<")" << RTT::endlog(); 
       current_tolerance_violations++;
     }
     if(fabs(joint_d_error_(i)) > velocity_tolerance_(i))  {
-      //if(verbose_) RTT::log(RTT::Debug) << "Joint " << i << " velocity error tolerance violated ("<<velocity_tracking_error<<" > "<<velocity_tolerance_[i]<<")" << RTT::endlog(); 
+      if(verbose_) RTT::log(RTT::Warning) << "["<<this->getName() <<"] Joint " << i << " velocity error tolerance violated ("<<fabs(joint_d_error_[i])<<" > "<<velocity_tolerance_[i]<<")" << RTT::endlog(); 
       current_tolerance_violations++;
     }
   }
@@ -247,6 +268,7 @@ void JointPIDController::updateHook()
     tolerance_violations_ += current_tolerance_violations;
     joint_effort_.setZero();
   } else {
+
     // Compute the command
     if(compensate_friction_) {
       for(unsigned i=0; i<n_dof_; i++) {
@@ -262,11 +284,29 @@ void JointPIDController::updateHook()
           + d_gains_(i)*joint_d_error_(i);
       }
     } else {
-      joint_effort_ = (
-          p_gains_.array()*joint_p_error_.array()
-          + i_gains_.array()*joint_i_error_.array()                  
-          + d_gains_.array()*joint_d_error_.array()
-          ).matrix();
+      if(0) {
+
+        // Compute joint-space inertia matrix
+        KDL::JntArray positions;
+        positions.data = joint_position_;
+        if(chain_dynamics_->JntToMass(positions, joint_inertia_) != 0) {
+          RTT::log(RTT::Error) << "Could not compute joint space inertia." << RTT::endlog();
+          this->error();
+          return;
+        }
+        Eigen::MatrixXd H = (joint_inertia_.data); // + (eye + d_gain).inverse() * motor_inertia 
+
+        joint_effort_ = 
+          H * (joint_acceleration_cmd_
+               + (p_gains_.array()*joint_p_error_.array()
+                  + i_gains_.array()*joint_i_error_.array()                  
+                  + d_gains_.array()*joint_d_error_.array()).matrix());
+      } else {
+        joint_effort_ = 
+          (p_gains_.array()*joint_p_error_.array()
+           + i_gains_.array()*joint_i_error_.array()                  
+           + d_gains_.array()*joint_d_error_.array()).matrix();
+      }
     }
     
     // Check for old tolerance violations

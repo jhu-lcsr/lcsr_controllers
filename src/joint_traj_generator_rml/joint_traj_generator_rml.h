@@ -61,6 +61,7 @@ namespace lcsr_controllers {
 
     RTT::OutputPort<Eigen::VectorXd> joint_position_out_;
     RTT::OutputPort<Eigen::VectorXd> joint_velocity_out_;
+    RTT::OutputPort<Eigen::VectorXd> joint_acceleration_out_;
 
     RTT::InputPort<trajectory_msgs::JointTrajectoryPoint> joint_traj_point_cmd_in_;
     RTT::InputPort<trajectory_msgs::JointTrajectory> joint_traj_cmd_in_;
