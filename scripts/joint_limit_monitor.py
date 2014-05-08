@@ -40,7 +40,7 @@ def state_cb(msg):
 
 def main():
     global robot, rate
-    rospy.init_node('joint_limit_watcher')
+    rospy.init_node('joint_limit_monitor')
 
     rate = rospy.Rate(5)
 
