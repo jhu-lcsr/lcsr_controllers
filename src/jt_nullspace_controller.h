@@ -82,6 +82,8 @@ namespace lcsr_controllers {
       manipulability_,
       singularity_avoidance_gain_,
       joint_center_gain_,
+      nullspace_damping_,
+      nullspace_min_singular_value_,
       linear_p_gain_,
       linear_d_gain_,
       linear_effort_threshold_,
@@ -128,7 +130,8 @@ namespace lcsr_controllers {
       joint_p_gains_,
       joint_limits_min_,
       joint_limits_max_,
-      joint_limits_center_;
+      joint_limits_center_,
+      joint_limits_range_;
 
     geometry_msgs::WrenchStamped wrench_msg_;
     geometry_msgs::PoseStamped pose_err_msg_;

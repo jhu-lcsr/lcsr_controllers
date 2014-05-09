@@ -7,6 +7,7 @@
 #include <map>
 
 #include <Eigen/Dense>
+#include <Eigen/SVD> 
 
 #include <kdl/tree.hpp>
 
@@ -36,8 +37,10 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   // Working variables
   ,n_dof_(0)
   // Params
-  ,joint_center_gain_(0.0)
   ,singularity_avoidance_gain_(0.0)
+  ,joint_center_gain_(0.0)
+  ,nullspace_damping_(0.0)
+  ,nullspace_min_singular_value_(0.00001)
   ,linear_p_gain_(0.0)
   ,linear_d_gain_(0.0)
   ,linear_effort_threshold_(0.0)
@@ -88,6 +91,8 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   this->addProperty("manipulability",manipulability_);
   this->addProperty("singularity_avoidance_gain",singularity_avoidance_gain_);
   this->addProperty("joint_center_gain",joint_center_gain_);
+  this->addProperty("nullspace_damping",nullspace_damping_);
+  this->addProperty("nullspace_min_singular_value",nullspace_min_singular_value_);
   this->addProperty("linear_p_gain",linear_p_gain_);
   this->addProperty("linear_d_gain",linear_d_gain_);
   this->addProperty("linear_position_threshold",linear_position_threshold_);
@@ -142,6 +147,7 @@ bool JTNullspaceController::configureHook()
   rosparam->getComponentPrivate("target_frame");
   rosparam->getComponentPrivate("singularity_avoidance_gain");
   rosparam->getComponentPrivate("joint_center_gain");
+  rosparam->getComponentPrivate("nullspace_damping");
   rosparam->getComponentPrivate("linear_p_gain");
   rosparam->getComponentPrivate("linear_d_gain");
   rosparam->getComponentPrivate("linear_effort_threshold");
@@ -182,6 +188,7 @@ bool JTNullspaceController::configureHook()
     joint_limits_min_.resize(n_dof_);
     joint_limits_max_.resize(n_dof_);
     joint_limits_center_.resize(n_dof_);
+    joint_limits_range_.resize(n_dof_);
     unsigned int i=0;
     for(std::vector<KDL::Segment>::const_iterator it=kdl_chain_.segments.begin();
         it != kdl_chain_.segments.end();
@@ -190,6 +197,7 @@ bool JTNullspaceController::configureHook()
       joint_limits_min_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->lower;
       joint_limits_max_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->upper;
       joint_limits_center_(i) = (joint_limits_min_(i) + joint_limits_max_(i))/2.0;
+      joint_limits_range_(i) = (joint_limits_max_(i) - joint_limits_min_(i));
       i++;
     }
   }
@@ -352,8 +360,12 @@ void JTNullspaceController::updateHook()
     dur_compute_eff_ = ts->secondsSince(tic);
     tic = ts->getTicks();
 
+    // Compute nullspace effort (to be projected)
+    // This is based on:
+    // Springer Tracts in Advanced Robotics: Volume 49 
+    // Cartesian Impedance Control of Redundant and Flexible-Joint Robots
+    // by Christian Ott (ISBN 978-3-540-69253-9)
     {
-      // Compute nullspace effort (to be projected)
       joint_effort_null_.setZero();
 
       // Compute joint-space inertia matrix
@@ -362,22 +374,88 @@ void JTNullspaceController::updateHook()
         this->error();
         return;
       }
-      Eigen::MatrixXd H = (joint_inertia_.data); // + (eye + d_gain).inverse() * motor_inertia 
-      Eigen::MatrixXd H_inv = H.inverse();
+      Eigen::MatrixXd M = (joint_inertia_.data); // + (eye + d_gain).inverse() * motor_inertia 
+      Eigen::MatrixXd M_inv = M.inverse();
 
-      // Compute dynamically-consistent pseudoinverse
-      Matrix6Jd L = (J * H_inv * J_t).inverse() * J * H_inv;
+      // Compute nullspace basis
+      Eigen::MatrixXd Z(n_dof_-6,n_dof_);
 
-      // Compute nullspace projector
-      MatrixJJd eye = MatrixJJd::Identity(n_dof_,n_dof_);
-      MatrixJJd N = eye - J_t * L;
+      // Special case if n == 7, and the nullspace is 1-dimensional
+      if(n_dof_ == 7) {
+        for(int i=0; i<7; i++) {
+          Eigen::MatrixXd Ji(6,6);
+          Ji.leftCols(i) = J.leftCols(i);
+          Ji.rightCols(6-i) = J.rightCols(6-i);
+          Z(0,i) = pow(-1,7+i) * Ji.determinant();
+        }
+      } else {
+        /// TODO: support the general case
+        RTT::log(RTT::Error) << "No support for non-7DOF mechanisms." <<RTT::endlog();
+        this->error();
+        return;
+      }
+
+      // Compute projector
+      MatrixJJd P1,P2,P3,P4;
+      MatrixJJd N;
+      int projector_type_ = 4;
+      // Smallest singular value
+      double s_min;
+      switch(projector_type_) {
+        case 1: { // Unweighted projector
+                  MatrixJJd ZZt = Z*Z.transpose();
+                  P1 = Z.transpose()*(ZZt).inverse()*Z;
+                  N = P1;
+                  break; }
+        case 2: { // Mass-Weighted projector (to scale)
+                  P2 = M*P1;
+                  N = P2;
+                  break; }
+        case 3: { // Dynamically consistent projector
+                  P3 = M*Z.transpose()*(Z*M*Z.transpose()).inverse()*Z;
+                  N = P3;
+                  break; }
+        case 4: { // Operational space dynamically consistent projector
+                  MatrixJJd eye = MatrixJJd::Identity(n_dof_,n_dof_);
+                  Matrix6d JMinvJt = J*M_inv*J_t;
+                  Eigen::JacobiSVD<Matrix6d> svd(JMinvJt, Eigen::ComputeFullU | Eigen::ComputeFullV);
+                  Eigen::VectorXd s = svd.singularValues();
+                  Matrix6d S_inv(Matrix6d::Zero());
+                  for(int i=0; i<s.size(); i++) {
+                    if(s(i) > 0.00001) {
+                      S_inv(i,i) = 1.0/s(i);
+                    } else {
+                      S_inv(i,i) = 0.0;
+                    }
+                  }
+                  Matrix6d JMinvJt_inv = svd.matrixV() * S_inv * svd.matrixU().transpose();
+                  P4 = eye - J_t*(JMinvJt_inv)*J*M_inv;
+                  N = P4;
+                  break; }
+      };
+      
+      if(s_min < 0.001) {
+        //RTT::log(RTT::Warning) << "Minimum singular value in projector is: "<<s_min<<RTT::endlog();
+      }
 
       dur_compute_nullspace_ = ts->secondsSince(tic);
       tic = ts->getTicks();
 
-      // Nullspace damping term //////////////////////////////////////////////////////////////////////
+      // Nullspace damping term 
       {
-        joint_effort_null_ += -1.0 * (joint_d_gains_.array() * joint_velocity_.array()).matrix();
+        joint_effort_null_ -= nullspace_damping_ * (joint_d_gains_.array() * joint_velocity_.array()).matrix();
+      }
+
+      // Nullspace limit avoidance term
+      // Local gradient optimization based on cost fucntion given in "Inverse
+      // Kinematics and Control of a 7-DOF Redundant Manipulator Based on the
+      // Closed-Loop Algorithm"
+      {
+        Eigen::VectorXd center_err_by_range = ((joint_position_ - joint_limits_center_).array() / joint_limits_range_.array()).matrix();
+        Eigen::VectorXd center_direction = (center_err_by_range.array() * center_err_by_range.array().abs().pow(4)
+          / center_err_by_range.lpNorm<6>()).matrix();
+
+        joint_effort_null_ -= joint_center_gain_ * center_direction;
       }
 
       dur_compute_damping_ = ts->secondsSince(tic);
@@ -385,6 +463,7 @@ void JTNullspaceController::updateHook()
 
       // Singularity avoidance term //////////////////////////////////////////////////////////////////
       // Yoshikawa, 1984: "Analysis and Control of Robot Manipulators with Redundancy" ///////////////
+      // TODO: Optimize this computation for realtime
       if(singularity_avoidance_gain_ > 0.001)
       {
         // Compute manipulability
