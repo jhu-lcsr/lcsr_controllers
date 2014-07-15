@@ -160,6 +160,7 @@ bool JointPIDController::configureHook()
   rosparam->getComponentPrivate("static_effort");
   rosparam->getComponentPrivate("static_deadband");
   rosparam->getComponentPrivate("static_eps");
+  rosparam->getComponentPrivate("verbose");
 
   // Prepare ports for realtime processing
   joint_effort_out_.setDataSample(joint_effort_);
@@ -327,8 +328,10 @@ void JointPIDController::updateHook()
     joint_state_desired_.header.stamp = rtt_rosclock::host_now();
     joint_state_desired_.position.resize(n_dof_);
     joint_state_desired_.velocity.resize(n_dof_);
+    joint_state_desired_.effort.resize(n_dof_);
     std::copy(joint_position_cmd_.data(), joint_position_cmd_.data() + n_dof_, joint_state_desired_.position.begin());
     std::copy(joint_velocity_cmd_.data(), joint_velocity_cmd_.data() + n_dof_, joint_state_desired_.velocity.begin());
+    std::copy(joint_effort_.data(), joint_effort_.data() + n_dof_, joint_state_desired_.effort.begin());
     joint_state_desired_out_.write(joint_state_desired_);
   }
 }
