@@ -35,6 +35,10 @@ namespace lcsr_controllers {
   class JointTrajGeneratorRML : public RTT::TaskContext
   {
   public:
+    // Convenience typedefs for actionlib
+    ACTION_DEFINITION(control_msgs::FollowJointTrajectoryAction);
+    typedef actionlib::ServerGoalHandle<control_msgs::FollowJointTrajectoryAction> GoalHandle;
+
     // RTT Properties
     bool use_rosparam_;
     bool use_rostopic_;
@@ -52,6 +56,14 @@ namespace lcsr_controllers {
       max_jerks_;
     bool verbose_;
     bool stop_on_violation_;
+
+    typedef enum {
+      INACTIVE = 0,
+      FOLLOWING = 1,
+      RECOVERING = 2
+    } Mode;
+
+    Mode traj_mode_;
 
   protected:
     // RTT Ports
@@ -74,7 +86,8 @@ namespace lcsr_controllers {
     virtual void updateHook();
     virtual void stopHook();
     virtual void cleanupHook();
-    
+    virtual void errorHook();
+
     //! A trajectory segment structure for internal use 
     // This structure is used so that trajectory points can be decoupled from
     // each-other. The standard ROS trajectory message includes a timestamp
@@ -84,9 +97,12 @@ namespace lcsr_controllers {
     // representation, where each point has a well-defined start and end time.
     struct TrajSegment 
     {
+      static size_t segment_count;
+
       TrajSegment(
           size_t n_dof, 
           bool flexible_ = false) :
+        queued(false),
         active(false),
         achieved(false),
         flexible(flexible_),
@@ -95,9 +111,32 @@ namespace lcsr_controllers {
         expected_time(ros::Time(0,0)), 
         goal_positions(Eigen::VectorXd::Constant(n_dof,0.0)),
         goal_velocities(Eigen::VectorXd::Constant(n_dof,0.0)),
-        goal_accelerations(Eigen::VectorXd::Constant(n_dof,0.0))
-      { }
+        goal_accelerations(Eigen::VectorXd::Constant(n_dof,0.0)),
+        gh(NULL),
+        gh_required(NULL)
+      {
+        id = segment_count++;
+      }
 
+
+      ~TrajSegment() {
+        // If the goal handle is valid, check if the goal should succeed or abort
+        if(queued && gh && gh->isValid() && gh->getGoalStatus().status == actionlib_msgs::GoalStatus::ACTIVE) {
+          if(achieved) {
+            *gh_required -= 1;
+            if(*gh_required == 0) {
+              RTT::log(RTT::Debug) << "All goal trajectory segments have been acheived. Setting goal succeeded." << RTT::endlog();
+              gh->setSucceeded();
+            }
+          } else {
+            RTT::log(RTT::Debug) << "Trajectory segment ("<<id<<") removed without being achieved. Aborting goal." << RTT::endlog();
+            gh->setAborted();
+          }
+        }
+      }
+
+      size_t id;
+      bool queued;
       bool active;
       bool achieved;
       bool flexible;
@@ -107,6 +146,10 @@ namespace lcsr_controllers {
       Eigen::VectorXd goal_positions;
       Eigen::VectorXd goal_velocities;
       Eigen::VectorXd goal_accelerations;
+
+      // Associated goal handle
+      GoalHandle *gh;
+      size_t *gh_required;
 
       //! End-Time comparison function for binary search
       static bool StartTimeCompare(const TrajSegment &s1, const TrajSegment &s2) { 
@@ -133,7 +176,9 @@ namespace lcsr_controllers {
         const std::vector<size_t> &ip,
         const size_t n_dof,
         const ros::Time trajectory_start_time,
-        TrajSegments &segments);
+        TrajSegments &segments,
+        GoalHandle *gh = NULL,
+        size_t *gh_required = NULL);
 
     //! Update the one trajectory with points from another
     static bool SpliceTrajectory(
@@ -146,27 +191,85 @@ namespace lcsr_controllers {
         boost::shared_ptr<RMLPositionInputParameters> &rml_in,
         boost::shared_ptr<RMLPositionOutputParameters> &rml_out,
         RMLPositionFlags &rml_flags) const;
-    
-    /** \brief Sample the trajectory based on the current set of segments and robot state
-     * This function does not change the state of the component, so it can be
-     * used easily in testing or with lookaheads.
+
+    /** \brief Update the segments and determine if the traj needs to be
+     * recomputed.
+     *
+     * Returns: true if the list of segments has changed or if a segment has
+     * been activated
      */
-    bool sampleTrajectory(
+    bool updateSegments(
         const ros::Time rtt_now,
         const Eigen::VectorXd &joint_position,
         const Eigen::VectorXd &joint_velocity,
+        JointTrajGeneratorRML::TrajSegments &segments) const;
+
+    //! Determine if the tolerances have been violated
+    bool tolerancesViolated(
+        const Eigen::VectorXd &joint_position,
+        const Eigen::VectorXd &joint_velocity,
         const Eigen::VectorXd &joint_acceleration,
+        const boost::shared_ptr<RMLPositionOutputParameters> rml_out,
+        std::vector<bool> &position_tolerance_violations,
+        std::vector<bool> &velocity_tolerance_violations) const;
+
+    //! Compute trajectory initialized by an arbitrary state
+    void computeTrajectory(
+        const ros::Time rtt_now,
+        const Eigen::VectorXd &init_position,
+        const Eigen::VectorXd &init_velocity,
+        const Eigen::VectorXd &init_acceleration,
+        const ros::Duration duration,
+        const Eigen::VectorXd &goal_position,
+        const Eigen::VectorXd &goal_velocity,
         boost::shared_ptr<ReflexxesAPI> rml,
         boost::shared_ptr<RMLPositionInputParameters> rml_in,
         boost::shared_ptr<RMLPositionOutputParameters> rml_out,
-        RMLPositionFlags &rml_flags,
-        JointTrajGeneratorRML::TrajSegments &segments,
-        JointTrajGeneratorRML::TrajSegment &active_segment,
+        RMLPositionFlags &rml_flags) const;
+
+    //! Compute trajectory initialized by the last output of rml_out
+    void computeTrajectory(
+        const ros::Time rtt_now,
+        const ros::Duration duration,
+        const Eigen::VectorXd &goal_position,
+        const Eigen::VectorXd &goal_velocity,
+        boost::shared_ptr<ReflexxesAPI> rml,
+        boost::shared_ptr<RMLPositionInputParameters> rml_in,
+        boost::shared_ptr<RMLPositionOutputParameters> rml_out,
+        RMLPositionFlags &rml_flags) const;
+
+    //! Compute trajectory initialized by the last output of rml_out 
+    bool computeTrajectory(
+        const ros::Time rtt_now,
+        const JointTrajGeneratorRML::TrajSegments::iterator active_segment,
+        boost::shared_ptr<ReflexxesAPI> rml,
+        boost::shared_ptr<RMLPositionInputParameters> rml_in,
+        boost::shared_ptr<RMLPositionOutputParameters> rml_out,
+        RMLPositionFlags &rml_flags) const;
+
+    /** \brief Sample the trajectory based on the current set of segments and robot state
+     * This function does not change the state of the component, so it can be
+     * used easily in testing or with lookaheads.
+     *
+     * Returns: true if segment achieved
+     */
+    bool sampleTrajectory(
+        const ros::Time rtt_now,
+        const ros::Time last_segment_start_time,
+        boost::shared_ptr<ReflexxesAPI> rml,
+        boost::shared_ptr<RMLPositionOutputParameters> rml_out,
         Eigen::VectorXd &joint_position_sample,
         Eigen::VectorXd &joint_velocity_sample,
-        Eigen::VectorXd &joint_acceleration_sample,
-        std::vector<bool> &position_tolerance_violations,
-        std::vector<bool> &velocity_tolerance_violations) const;
+        Eigen::VectorXd &joint_acceleration_sample) const;
+
+    /** \brief Handle / cleanup sample error
+     *
+     * This cleans up any active goalhandles
+     */
+    void handleSampleError(const std::runtime_error &err);
+
+    //! Throw runtime_error on RML error code
+    void handleRMLResult(int rml_result) const;
 
     //! Output information about some RML input parameters
     static void RMLLog(
@@ -185,26 +288,32 @@ namespace lcsr_controllers {
 
   protected:
 
+    //! Read the command input ports
+    bool readCommands(
+        const ros::Time &rtt_now);
+
     //! Update a trajectory from an Eigen::VectorXd
-    bool updateSegments(
+    bool insertSegments(
         const Eigen::VectorXd &point,
         const ros::Time &time,
         TrajSegments &segments,
         std::vector<size_t> &index_permutation) const;
 
     //! Update a trajectory from a trajectory_msgs::JointTrajectoryPoint
-    bool updateSegments(
+    bool insertSegments(
         const trajectory_msgs::JointTrajectoryPoint &traj_point,
         const ros::Time &time,
         TrajSegments &segments,
         std::vector<size_t> &index_permutation) const;
 
     //! Update a trajectory from a trajectory_msgs::JointTrajectory
-    bool updateSegments(
+    bool insertSegments(
         const trajectory_msgs::JointTrajectory &trajectory,
         const ros::Time &time,
         TrajSegments &segments,
-        std::vector<size_t> &index_permutation) const;
+        std::vector<size_t> &index_permutation,
+        GoalHandle *gh = NULL,
+        size_t *gh_required = NULL) const;
 
     //! Get an identity permutation f(x) = x
     void getIdentityIndexPermutation(
@@ -243,6 +352,9 @@ namespace lcsr_controllers {
     boost::shared_ptr<RMLPositionInputParameters> rml_in_;
     boost::shared_ptr<RMLPositionOutputParameters> rml_out_;
     RMLPositionFlags rml_flags_;
+    RMLDoubleVector rml_zero_;
+    RMLBoolVector rml_true_;
+    ros::Time last_segment_start_time_;
 
     // Robot model
     std::vector<std::string> joint_names_;
@@ -251,6 +363,7 @@ namespace lcsr_controllers {
 
     // State
     Eigen::VectorXd
+      joint_zero_,
       joint_position_,
       joint_position_cmd_,
       joint_position_sample_,
@@ -275,12 +388,9 @@ namespace lcsr_controllers {
 
   private:
 
-    // Convenience typedefs for actionlib
-    ACTION_DEFINITION(control_msgs::FollowJointTrajectoryAction);
-    typedef actionlib::ServerGoalHandle<control_msgs::FollowJointTrajectoryAction> GoalHandle;
-
     //! Current action goal
     GoalHandle current_gh_;
+    size_t gh_segments_required_;
 
     //! Action feedback message
     Feedback feedback_;
