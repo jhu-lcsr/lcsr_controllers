@@ -1,6 +1,6 @@
 <package>
   <name>lcsr_controllers</name>
-  <version>0.1.0</version>
+  <version>0.1.1</version>
   <license>BSD</license>
   <maintainer email="jbo@jhu.edu">Jonathan Bohren</maintainer>
   <author email="jbo@jhu.edu">Jonathan Bohren</author>
