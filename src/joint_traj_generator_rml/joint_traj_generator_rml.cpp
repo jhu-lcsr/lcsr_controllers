@@ -536,10 +536,12 @@ bool JointTrajGeneratorRML::updateSegments(
     // This only applies to non-flexible segments
     if(  
         (it->achieved) ||                                  // Has already been achieved
+        (it->gh !=NULL && (!it->gh->isValid() || it->gh->getGoalStatus().status != actionlib_msgs::GoalStatus::ACTIVE)) ||
         //(it->achieved && next->flexible) ||
         (!it->flexible && it->expected_time < rtt_now) ||  // Should have finished earlier than now
         (next != segments.end() && !next->flexible && next->start_time <= rtt_now)) // Next segment should have started
     {
+      // Mark trivial segments as achieved
       if(!it->achieved) {
         // Check each dof
         bool within_tolerance = false;
@@ -559,16 +561,19 @@ bool JointTrajGeneratorRML::updateSegments(
         }
       }
 
+      // Update the erasure iterator
+      erase_it = it;
+      remove_old_segments = true;
+
       if(verbose_) {
         RTT::log(RTT::Debug) << "Segment ("<<it->id<<") needs to be removed." <<RTT::endlog();
+        RTT::log(RTT::Debug) << " - goal status: "<< ((it->gh == NULL) ? (-1) : int(it->gh->getGoalStatus().status)) << RTT::endlog();
         RTT::log(RTT::Debug) << " - achieved: "<<it->achieved  << RTT::endlog();
         RTT::log(RTT::Debug) << " - flexible: "<<it->flexible  <<  RTT::endlog();
         RTT::log(RTT::Debug) << " - start_time: "<<it->start_time  <<  RTT::endlog();
         RTT::log(RTT::Debug) << " - goal_time: "<<it->goal_time  <<  RTT::endlog();
         RTT::log(RTT::Debug) << " - expected_time: "<<it->expected_time  <<  RTT::endlog();
       }
-      erase_it = it;
-      remove_old_segments = true;
     }
   }
 
@@ -597,7 +602,7 @@ bool JointTrajGeneratorRML::updateSegments(
          front_segment->active = true;
          recompute_trajectory = true;
        } else {
-         if(verbose_) RTT::log(RTT::Debug) << "The front segment is neither flexible nor ready." << RTT::endlog();
+         //if(verbose_) RTT::log(RTT::Debug) << "The front segment is neither flexible nor ready." << RTT::endlog();
        }
     }
   }
@@ -911,17 +916,6 @@ void JointTrajGeneratorRML::updateHook()
   //joint_velocity_ = 0.98*joint_velocity_last_ + 0.02*joint_velocity_;
   joint_acceleration_ = 0.1*joint_acceleration_ + 0.9*(joint_velocity_ - joint_velocity_last_);
   joint_velocity_last_ = joint_velocity_;
-
-#if 0
-  // Do nothing and generate no output if there's no command
-  if(point_status == RTT::NoData &&
-     traj_status == RTT::NoData && 
-     traj_point_status == RTT::NoData &&
-     !current_gh_.isValid())
-  {
-    return;
-  } 
-#endif
 
   // Check tolerances if in following mode
   if(traj_mode_ == FOLLOWING) {
