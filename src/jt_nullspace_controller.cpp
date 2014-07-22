@@ -64,6 +64,7 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   ,angular_position_within_tolerance_(false)
   ,angular_effort_within_tolerance_(false)
   ,within_tolerance_(false)
+  ,projector_type_(4)
   ,tf_(this)
 {
   // Declare properties
@@ -101,6 +102,7 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   this->addProperty("angular_d_gain",angular_d_gain_);
   this->addProperty("angular_position_threshold",angular_position_threshold_);
   this->addProperty("angular_effort_threshold",angular_effort_threshold_);
+  this->addProperty("projector_type",projector_type_);
 
   this->addProperty("joint_d_gains",joint_d_gains_)
     .doc("Derivative gain used for joint-space control in the nullspace of the task-space command.");
@@ -158,6 +160,7 @@ bool JTNullspaceController::configureHook()
   rosparam->getComponentPrivate("angular_position_threshold");
 
   rosparam->getComponentPrivate("joint_d_gains");
+  rosparam->getComponentPrivate("projector_type");
 
   rosparam->getComponentPrivate("robot_description_param");
   rosparam->getParam(robot_description_param_, "robot_description");
@@ -279,7 +282,7 @@ void JTNullspaceController::updateHook()
     else if(target_frame_.length() > 0) 
     {
       if(tf_.canTransform(root_link_,target_frame_)) {
-        geometry_msgs::TransformStamped tform_msg = tf_.lookupTransform(root_link_,target_frame_);
+        geometry_msgs::TransformStamped tform_msg = tf_.lookupTransform(root_link_, target_frame_);
         KDL::Frame frame;
         tf::transformMsgToKDL(tform_msg.transform, frame);
         framevel_desired_.M.R = frame.M;
@@ -301,7 +304,6 @@ void JTNullspaceController::updateHook()
 
     // Compute forward kinematics of current pose
     // framevel_ is in the base_link coordinate frame
-
     fk_solver_vel_->JntToCart(posvel_, framevel_);
 
     // Compute the cartesian position and velocity error
@@ -348,6 +350,7 @@ void JTNullspaceController::updateHook()
       this->error();
       return;
     }
+    
     Matrix6Jd J = jacobian_.data;
     MatrixJ6d J_t = J.transpose();
 
@@ -398,7 +401,6 @@ void JTNullspaceController::updateHook()
       // Compute projector
       MatrixJJd P1,P2,P3,P4;
       MatrixJJd N;
-      int projector_type_ = 4;
       // Smallest singular value
       double s_min;
       switch(projector_type_) {
@@ -408,6 +410,8 @@ void JTNullspaceController::updateHook()
                   N = P1;
                   break; }
         case 2: { // Mass-Weighted projector (to scale)
+                  MatrixJJd ZZt = Z*Z.transpose();
+                  P1 = Z.transpose()*(ZZt).inverse()*Z;
                   P2 = M*P1;
                   N = P2;
                   break; }
@@ -422,7 +426,7 @@ void JTNullspaceController::updateHook()
                   Eigen::VectorXd s = svd.singularValues();
                   Matrix6d S_inv(Matrix6d::Zero());
                   for(int i=0; i<s.size(); i++) {
-                    if(s(i) > 0.00001) {
+                    if(s(i) > 0.01) {
                       S_inv(i,i) = 1.0/s(i);
                     } else {
                       S_inv(i,i) = 0.0;
@@ -516,6 +520,13 @@ void JTNullspaceController::updateHook()
     linear_effort_within_tolerance_ = linear_effort_norm_ < linear_effort_threshold_;
     angular_effort_within_tolerance_ = angular_effort_norm_ < angular_effort_threshold_;
 
+    if(within_tolerance_ && !linear_effort_within_tolerance_) {
+      RTT::log(RTT::Warning) << "JTNS: Linear effort exceeded tolerance: " << linear_effort_norm_ <<RTT::endlog();
+    }
+    if(within_tolerance_ && !angular_effort_within_tolerance_) {
+      RTT::log(RTT::Warning) << "JTNS: Angular effort exceeded tolerance: " << angular_effort_norm_ <<RTT::endlog();
+    }
+
     // Safety: set output effor to zero if not within tolerances
     within_tolerance_ =
       within_tolerance_ &&
@@ -533,17 +544,19 @@ void JTNullspaceController::updateHook()
 
     // Debug visualization
     if(this->debug_throttle_.ready(0.05)) {
-      wrench_msg_.header.frame_id = root_link_;
+      wrench_msg_.header.frame_id = tip_link_;
       wrench_msg_.header.stamp = rtt_rosclock::host_now();
-      wrench_msg_.wrench.force.x = wrench_(0);
-      wrench_msg_.wrench.force.y = wrench_(1);
-      wrench_msg_.wrench.force.z = wrench_(2);
-      wrench_msg_.wrench.torque.x = wrench_(3);
-      wrench_msg_.wrench.torque.y = wrench_(4);
-      wrench_msg_.wrench.torque.z = wrench_(5);
+      KDL::Wrench tip_wrench = /**frame.Inverse()* **/KDL::Wrench(KDL::Vector(wrench_(0), wrench_(1), wrench_(2)), KDL::Vector(wrench_(3), wrench_(4), wrench_(5)));
+      wrench_msg_.wrench.force.x = tip_wrench(0);
+      wrench_msg_.wrench.force.y = tip_wrench(1);
+      wrench_msg_.wrench.force.z = tip_wrench(2);
+      wrench_msg_.wrench.torque.x = tip_wrench(3);
+      wrench_msg_.wrench.torque.y = tip_wrench(4);
+      wrench_msg_.wrench.torque.z = tip_wrench(5);
       err_wrench_debug_out_.write(wrench_msg_);
 
       KDL::Frame frame_err_(framevel_err_.M.R,framevel_err_.p.p);
+
       pose_err_msg_.header.frame_id = tip_link_;
       pose_err_msg_.header.stamp = rtt_rosclock::host_now();
       tf::poseKDLToMsg(frame_err_,pose_err_msg_.pose);

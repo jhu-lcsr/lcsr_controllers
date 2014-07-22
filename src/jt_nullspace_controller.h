@@ -149,6 +149,8 @@ namespace lcsr_controllers {
       dur_compute_nullspace_,
       dur_compute_damping_,
       dur_compute_singularity_avoidance_;
+
+    int projector_type_;
   };
 }
 
