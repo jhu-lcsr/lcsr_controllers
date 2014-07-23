@@ -295,17 +295,14 @@ bool JointTrajGeneratorRML::SpliceTrajectory(
         TrajSegment::StartTimeCompare);
 
   // Remove all segments with start times after the start time of this trajectory
-  RTT::log(RTT::Debug) << "Erasing later segments." << RTT::endlog();
   current_segments.erase(insertion_range.first, current_segments.end());
 
   // Add the new segments to the end of the trajectory
-  RTT::log(RTT::Debug) << "Inserting segments." << RTT::endlog();
   current_segments.insert(
       current_segments.end(), 
       new_segments.begin(), 
       new_segments.end());
 
-  RTT::log(RTT::Debug) << "Queueing segments." << RTT::endlog();
   for(TrajSegments::iterator it = current_segments.begin();
       it != current_segments.end();
       ++it)
