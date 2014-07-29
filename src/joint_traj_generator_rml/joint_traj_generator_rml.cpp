@@ -830,9 +830,8 @@ bool JointTrajGeneratorRML::insertSegments(
 {
   // Clear the segments, since this starts immediately
   segments.clear();
-  // Create a unary trajectory
+  // Create a unary trajectory with zero as the desired start time (start immediately)
   trajectory_msgs::JointTrajectory unary_joint_traj;
-  unary_joint_traj.header.stamp = time;
   unary_joint_traj.points.push_back(traj_point);
 
   return this->insertSegments(unary_joint_traj, time, segments, index_permutation);
@@ -863,7 +862,15 @@ bool JointTrajGeneratorRML::insertSegments(
       // Offset the NTP-corrected time to get the RTT-time
       // Correct the timestamp so that its relative to the realtime clock
       // TODO: make it so this can be disabled or make two different ports
-      new_traj_start_time = trajectory.header.stamp + (rtt_rosclock::rtt_now() - rtt_rosclock::host_now());
+      try {
+        new_traj_start_time = rtt_rosclock::rtt_now() + (trajectory.header.stamp - rtt_rosclock::host_now());
+      } catch(std::runtime_error &err) {
+        RTT::log(RTT::Info) << "Header Stamp: " << trajectory.header.stamp <<RTT::endlog();
+        RTT::log(RTT::Info) << "RTT Now: " << rtt_rosclock::rtt_now() <<RTT::endlog();
+        RTT::log(RTT::Info) << "Host Now: " << rtt_rosclock::host_now() <<RTT::endlog();
+        RTT::log(RTT::Error) << "error: " << err.what() << RTT::endlog();
+        throw;
+      }
     }
 
     // Get the proper index permutation
@@ -915,7 +922,8 @@ void JointTrajGeneratorRML::updateHook()
   joint_velocity_last_ = joint_velocity_;
 
   // Check tolerances if in following mode
-  if(traj_mode_ == FOLLOWING) {
+  if(traj_mode_ == FOLLOWING) 
+  {
     // Sample the pre-computed trajectory the current time to get the expected joint state
     rml_->RMLPositionAtAGivenSampleTime(
         std::max(0.0,(rtt_now - last_segment_start_time_).toSec()),
@@ -1025,7 +1033,8 @@ void JointTrajGeneratorRML::updateHook()
   }
 
   // Switch behavior based on the current mode
-  switch(traj_mode_) {
+  switch(traj_mode_)
+  {
     case INACTIVE:
       // Seed the trajectory generator with the current position of the arm
       // NOTE: This ignores all inputs until in the "following" mode
@@ -1037,7 +1046,7 @@ void JointTrajGeneratorRML::updateHook()
         this->computeTrajectory(
             rtt_now,
             joint_position_,
-            joint_velocity_,
+            joint_zero_,
             joint_zero_,
             ros::Duration(0.0),
             joint_position_,
