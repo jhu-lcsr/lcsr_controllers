@@ -85,6 +85,9 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   this->addProperty("dur_compute_wrench_",dur_compute_wrench_);
   this->addProperty("dur_compute_jac_",dur_compute_jac_);
   this->addProperty("dur_compute_eff_",dur_compute_eff_);
+  this->addProperty("dur_compute_resize_nullspace_basis_",dur_compute_resize_nullspace_basis_);
+  this->addProperty("dur_compute_nullspace_basis_",dur_compute_nullspace_basis_);
+  this->addProperty("dur_compute_joint_inertia_",dur_compute_joint_inertia_);
   this->addProperty("dur_compute_nullspace_",dur_compute_nullspace_);
   this->addProperty("dur_compute_damping_",dur_compute_damping_);
   this->addProperty("dur_compute_singularity_avoidance_",dur_compute_singularity_avoidance_);
@@ -338,11 +341,6 @@ void JTNullspaceController::updateHook()
     dur_compute_wrench_ = ts->secondsSince(tic);
     tic = ts->getTicks();
 
-    // Handy typedefs
-    typedef Eigen::Matrix<double, 6, 6> Matrix6d;
-    typedef Eigen::Matrix<double, 6, Eigen::Dynamic> Matrix6Jd;
-    typedef Eigen::Matrix<double, Eigen::Dynamic, 6> MatrixJ6d;
-    typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> MatrixJJd;
 
     // Compute jacobian
     if(jac_solver_->JntToJac(positions_, jacobian_) != 0) {
@@ -361,7 +359,7 @@ void JTNullspaceController::updateHook()
     joint_effort_raw_ = J_t*wrench_;
 
     dur_compute_eff_ = ts->secondsSince(tic);
-    tic = ts->getTicks();
+      tic = ts->getTicks();
 
     // Compute nullspace effort (to be projected)
     // This is based on:
@@ -371,55 +369,44 @@ void JTNullspaceController::updateHook()
     {
       joint_effort_null_.setZero();
 
-      // Compute joint-space inertia matrix
-      if(chain_dynamics_->JntToMass(positions_, joint_inertia_) != 0) {
-        RTT::log(RTT::Error) << "Could not compute joint space inertia." << RTT::endlog();
-        this->error();
-        return;
-      }
-      Eigen::MatrixXd M = (joint_inertia_.data); // + (eye + d_gain).inverse() * motor_inertia 
-      Eigen::MatrixXd M_inv = M.inverse();
-
       // Compute nullspace basis
-      Eigen::MatrixXd Z(n_dof_-6,n_dof_);
+      Z = Eigen::MatrixXd(J_t.householderQr().householderQ()).rightCols(n_dof_-6).transpose();
 
-      // Special case if n == 7, and the nullspace is 1-dimensional
-      if(n_dof_ == 7) {
-        for(int i=0; i<7; i++) {
-          Eigen::MatrixXd Ji(6,6);
-          Ji.leftCols(i) = J.leftCols(i);
-          Ji.rightCols(6-i) = J.rightCols(6-i);
-          Z(0,i) = pow(-1,7+i) * Ji.determinant();
+      dur_compute_nullspace_basis_ = ts->secondsSince(tic);
+      tic = ts->getTicks();
+
+      // Compute joint-space inertia matrix
+      if(projector_type_ > 1) {
+        if(chain_dynamics_->JntToMass(positions_, joint_inertia_) != 0) {
+          RTT::log(RTT::Error) << "Could not compute joint space inertia." << RTT::endlog();
+          this->error();
+          return;
         }
-      } else {
-        /// TODO: support the general case
-        RTT::log(RTT::Error) << "No support for non-7DOF mechanisms." <<RTT::endlog();
-        this->error();
-        return;
       }
+
+      dur_compute_joint_inertia_ = ts->secondsSince(tic);
+      tic = ts->getTicks();
 
       // Compute projector
-      MatrixJJd P1,P2,P3,P4;
-      MatrixJJd N;
       // Smallest singular value
       double s_min;
       switch(projector_type_) {
-        case 1: { // Unweighted projector
-                  MatrixJJd ZZt = Z*Z.transpose();
-                  P1 = Z.transpose()*(ZZt).inverse()*Z;
+        case 1: { // Unweighted rrojector
+                  P1 = Z.transpose()*(Z*Z.transpose()).inverse()*Z;
                   N = P1;
                   break; }
         case 2: { // Mass-Weighted projector (to scale)
-                  MatrixJJd ZZt = Z*Z.transpose();
-                  P1 = Z.transpose()*(ZZt).inverse()*Z;
-                  P2 = M*P1;
+                  P2 = (joint_inertia_.data)*Z.transpose()*(Z*Z.transpose()).inverse()*Z;
                   N = P2;
                   break; }
         case 3: { // Dynamically consistent projector
+                  Eigen::MatrixXd &M = (joint_inertia_.data); // + (eye + d_gain).inverse() * motor_inertia 
                   P3 = M*Z.transpose()*(Z*M*Z.transpose()).inverse()*Z;
                   N = P3;
                   break; }
         case 4: { // Operational space dynamically consistent projector
+                  Eigen::MatrixXd &M = (joint_inertia_.data); // + (eye + d_gain).inverse() * motor_inertia 
+                  Eigen::MatrixXd M_inv = M.inverse();
                   MatrixJJd eye = MatrixJJd::Identity(n_dof_,n_dof_);
                   Matrix6d JMinvJt = J*M_inv*J_t;
                   Eigen::JacobiSVD<Matrix6d> svd(JMinvJt, Eigen::ComputeFullU | Eigen::ComputeFullV);

@@ -148,9 +148,25 @@ namespace lcsr_controllers {
       dur_compute_eff_,
       dur_compute_nullspace_,
       dur_compute_damping_,
-      dur_compute_singularity_avoidance_;
+      dur_compute_singularity_avoidance_,
+      dur_compute_nullspace_basis_,
+      dur_compute_joint_inertia_,
+      dur_compute_resize_nullspace_basis_;
 
     int projector_type_;
+  private:
+    // Handy typedefs
+    typedef Eigen::Matrix<double, 6, 6> Matrix6d;
+    typedef Eigen::Matrix<double, 6, Eigen::Dynamic> Matrix6Jd;
+    typedef Eigen::Matrix<double, Eigen::Dynamic, 6> MatrixJ6d;
+    typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> MatrixJJd;
+    // temporaries
+    //Eigen::MatrixXd M;
+    Eigen::MatrixXd Z;
+    Matrix6d Ji;
+    MatrixJJd P1,P2,P3,P4;
+    MatrixJJd N;
+    MatrixJJd ZZt;
   };
 }
 
