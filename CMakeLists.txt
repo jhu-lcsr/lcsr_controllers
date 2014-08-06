@@ -13,7 +13,8 @@ find_package(catkin REQUIRED
   geometry_msgs
   control_msgs
   control_toolbox
-  reflexxes_type2)
+  reflexxes_type2
+  telemanip_msgs)
 
 find_package(orocos_kdl REQUIRED)
 find_package(Eigen REQUIRED)
@@ -54,22 +55,17 @@ orocos_component(${PROJECT_NAME}
   src/semi_absolute_calibration_controller.cpp
   )
 
-target_link_libraries(
-  ${PROJECT_NAME}
-  lcsr_controllers_friction
+set(COMPONENT_LIBS
   ${orocos_kdl_LIBRARIES}
   ${catkin_LIBRARIES})
 
-orocos_component(lcsr_controllers_jt_nullspace_controller
-  src/jt_nullspace_controller.cpp
-)
+target_link_libraries( ${PROJECT_NAME} ${COMPONENT_LIBS} lcsr_controllers_friction)
 
-target_link_libraries(
-  lcsr_controllers_jt_nullspace_controller
-  lcsr_controllers_friction
-  ${orocos_kdl_LIBRARIES}
-  ${catkin_LIBRARIES})
+orocos_component(lcsr_controllers_jt_nullspace_controller src/jt_nullspace_controller.cpp)
+orocos_component(lcsr_controllers_cartesian_logistic_servo src/cartesian_logistic_servo.cpp)
 
+target_link_libraries(lcsr_controllers_jt_nullspace_controller ${COMPONENT_LIBS} lcsr_controllers_friction)
+target_link_libraries(lcsr_controllers_cartesian_logistic_servo ${COMPONENT_LIBS})
 
 add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_generate_messages_cpp)
 
