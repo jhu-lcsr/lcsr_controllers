@@ -34,13 +34,11 @@ orocos_use_package(conman)
 
 include_directories(
   ${catkin_INCLUDE_DIRS}
-  ${USE_OROCOS_INCLUDE_DIRS}
   ${Eigen_INCLUDE_DIRS}
   ${orocos_kdl_INCLUDE_DIRS})
 link_directories(
   ${catkin_LIBRARY_DIRS}
-  ${orocos_kdl_LIBRARY_DIRS}
-  ${USE_OROCOS_LIBRARY_DIRS})
+  ${orocos_kdl_LIBRARY_DIRS})
 
 add_library(lcsr_controllers_friction
   src/friction/joint_friction_compensator_hss.cpp)
@@ -54,17 +52,26 @@ orocos_component(${PROJECT_NAME}
   src/joint_traj_generator_kdl.cpp
   src/joint_traj_generator_rml/joint_traj_generator_rml.cpp
   src/semi_absolute_calibration_controller.cpp
-  src/jt_nullspace_controller.cpp
   )
 
 target_link_libraries(
   ${PROJECT_NAME}
   lcsr_controllers_friction
   ${orocos_kdl_LIBRARIES}
-  ${USE_OROCOS_LIBRARIES} 
   ${catkin_LIBRARIES})
 
-add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS})
+orocos_component(lcsr_controllers_jt_nullspace_controller
+  src/jt_nullspace_controller.cpp
+)
+
+target_link_libraries(
+  lcsr_controllers_jt_nullspace_controller
+  lcsr_controllers_friction
+  ${orocos_kdl_LIBRARIES}
+  ${catkin_LIBRARIES})
+
+
+add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_generate_messages_cpp)
 
 orocos_generate_package(
   DEPENDS ${PROJECT_NAME}

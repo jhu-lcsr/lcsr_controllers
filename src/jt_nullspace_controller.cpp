@@ -13,6 +13,8 @@
 
 #include <kdl_parser/kdl_parser.hpp>
 
+#include <ocl/Component.hpp>
+
 #include <rtt_rosparam/rosparam.h>
 
 #include <rtt_tf/tf_interface.h>
@@ -225,7 +227,6 @@ bool JTNullspaceController::configureHook()
   joint_effort_null_.resize(n_dof_);
 
   // Resize working vectors
-  positions_.resize(n_dof_);
   velocities_.resize(n_dof_);
   posvel_.resize(n_dof_);
   jacobian_.resize(n_dof_);
@@ -263,11 +264,8 @@ void JTNullspaceController::updateHook()
     tic = ts->getTicks();
 
     // Get JntArray structures from pos/vel
-    positions_.data = joint_position_;
-    velocities_.data = joint_velocity_;
-    
-    posvel_.q = positions_;
-    posvel_.qdot = velocities_;
+    posvel_.q.data = joint_position_;
+    posvel_.qdot.data = joint_velocity_;
 
     // Read the command
     RTT::FlowStatus ros_status = pose_desired_in_.readNewest(pose_msg_);
@@ -343,7 +341,7 @@ void JTNullspaceController::updateHook()
 
 
     // Compute jacobian
-    if(jac_solver_->JntToJac(positions_, jacobian_) != 0) {
+    if(jac_solver_->JntToJac(posvel_.q, jacobian_) != 0) {
       RTT::log(RTT::Error) << "Could not compute manipulator jacobian." << RTT::endlog();
       this->error();
       return;
@@ -377,7 +375,7 @@ void JTNullspaceController::updateHook()
 
       // Compute joint-space inertia matrix
       if(projector_type_ > 1) {
-        if(chain_dynamics_->JntToMass(positions_, joint_inertia_) != 0) {
+        if(chain_dynamics_->JntToMass(posvel_.q, joint_inertia_) != 0) {
           RTT::log(RTT::Error) << "Could not compute joint space inertia." << RTT::endlog();
           this->error();
           return;
@@ -391,7 +389,7 @@ void JTNullspaceController::updateHook()
       // Smallest singular value
       double s_min;
       switch(projector_type_) {
-        case 1: { // Unweighted rrojector
+        case 1: { // Unweighted projector
                   P1 = Z.transpose()*(Z*Z.transpose()).inverse()*Z;
                   N = P1;
                   break; }
@@ -469,7 +467,7 @@ void JTNullspaceController::updateHook()
         // Add the singularity avoidance from each joint component
         for(unsigned l=0; l < n_dof_; l++) {
           // Compute jacobian joint position derivative
-          positions_plus.data = positions_.data;
+          positions_plus.data = posvel_.q.data;
           positions_plus.data(l) += q_plus;
 
           if(jac_solver_->JntToJac(positions_plus, jac_plus) != 0) {
@@ -561,3 +559,6 @@ void JTNullspaceController::stopHook()
 void JTNullspaceController::cleanupHook()
 {
 }
+
+ORO_CREATE_COMPONENT_LIBRARY()
+ORO_LIST_COMPONENT_TYPE(lcsr_controllers::JTNullspaceController)
