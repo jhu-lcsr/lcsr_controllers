@@ -130,7 +130,7 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   this->ports()->addPort("joint_position_in", joint_position_in_);
   this->ports()->addPort("joint_velocity_in", joint_velocity_in_);
   this->ports()->addPort("joint_posture_in", joint_posture_in_);
-  this->ports()->addPort("pose_twist_in", pose_twist_in_);
+  this->ports()->addPort("framevel_in", pose_twist_in_);
   this->ports()->addPort("joint_effort_out", joint_effort_out_);
 
   // Add the port and stream it to a ROS topic

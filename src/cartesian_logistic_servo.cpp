@@ -48,7 +48,7 @@ CartesianLogisticServo::CartesianLogisticServo(std::string const& name) :
     .doc("The tip link for the controller.");
   this->addProperty("target_frame",target_frame_)
     .doc("The target frame to track with tip_link.");
-  this->addProperty("max_linear_rate_",max_linear_rate_);
+  this->addProperty("max_linear_rate",max_linear_rate_);
   this->addProperty("max_angular_rate",max_angular_rate_);
 
   // Configure data ports
@@ -67,7 +67,7 @@ bool CartesianLogisticServo::configureHook()
   rosparam->getComponentPrivate("root_link");
   rosparam->getComponentPrivate("tip_link");
   rosparam->getComponentPrivate("target_frame");
-  rosparam->getComponentPrivate("max_liear_rate");
+  rosparam->getComponentPrivate("max_linear_rate");
   rosparam->getComponentPrivate("max_angular_rate");
 
   rosparam->getComponentPrivate("robot_description_param");
@@ -206,7 +206,7 @@ void CartesianLogisticServo::updateHook()
 
   // Reintegrate the twist
   if(period.toSec() > 1E-8) {
-    frame_limited_.Integrate(tip_frame_twist_, 1.0/period.toSec());
+    frame_limited_.Integrate(frame_limited_.M.Inverse()*tip_frame_twist_, 1.0/period.toSec());
     framevel_limited_ = frame_limited_;
   } else {
     RTT::log(RTT::Warning) << "CartesianLogisticServo: Period went backwards or is exceptionally small. Not changing output pose." << RTT::endlog();
