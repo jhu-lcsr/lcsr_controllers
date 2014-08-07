@@ -202,11 +202,13 @@ bool JTNullspaceController::configureHook()
         it != kdl_chain_.segments.end();
         it++)
     {
-      joint_limits_min_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->lower;
-      joint_limits_max_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->upper;
-      joint_limits_center_(i) = (joint_limits_min_(i) + joint_limits_max_(i))/2.0;
-      joint_limits_range_(i) = (joint_limits_max_(i) - joint_limits_min_(i));
-      i++;
+      if(it->getJoint().getType() != KDL::Joint::None) {
+        joint_limits_min_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->lower;
+        joint_limits_max_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->upper;
+        joint_limits_center_(i) = (joint_limits_min_(i) + joint_limits_max_(i))/2.0;
+        joint_limits_range_(i) = (joint_limits_max_(i) - joint_limits_min_(i));
+        i++;
+      }
     }
   }
 

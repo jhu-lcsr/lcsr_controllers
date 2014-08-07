@@ -128,7 +128,9 @@ bool IKController::configureHook()
       it != kdl_chain_.segments.end();
       ++it)
   {
-    joint_state_desired_.name.push_back(it->getJoint().getName());
+    if(it->getJoint().getType() != KDL::Joint::None) {
+      joint_state_desired_.name.push_back(it->getJoint().getName());
+    }
   }
 
   // Resize working variables
@@ -147,9 +149,11 @@ bool IKController::configureHook()
         it != kdl_chain_.segments.end();
         it++)
     {
-      joint_limits_min_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->lower;
-      joint_limits_max_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->upper;
-      i++;
+      if(it->getJoint().getType() != KDL::Joint::None) {
+        joint_limits_min_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->lower;
+        joint_limits_max_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->upper;
+        i++;
+      }
     }
   }
 
