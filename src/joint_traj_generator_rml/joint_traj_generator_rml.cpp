@@ -211,6 +211,9 @@ bool JointTrajGeneratorRML::configureHook()
   index_permutation_.resize(n_dof_);
   active_segment_ = TrajSegment(n_dof_,false);
 
+  // Start the action server
+  rtt_action_server_.start();
+
   // Configure RML structures
   return this->configureRML(rml_, rml_in_, rml_out_, rml_flags_);
 }
@@ -258,7 +261,6 @@ bool JointTrajGeneratorRML::configureRML(
 bool JointTrajGeneratorRML::startHook()
 {
   segments_.clear();
-  rtt_action_server_.start();
 
   joint_position_.setZero();
   joint_velocity_.setZero();
@@ -1287,6 +1289,11 @@ void JointTrajGeneratorRML::RMLLog(
 void JointTrajGeneratorRML::goalCallback(JointTrajGeneratorRML::GoalHandle gh)
 {
   RTT::log(RTT::Info) << "Recieved action goal." << RTT::endlog();
+  if(this->getTaskState() != RTT::TaskContext::Running) {
+    RTT::log(RTT::Error) << "Rejected action goal, component not running." << RTT::endlog();
+    current_gh_.setRejected();
+    return;
+  }
 
   // Always preempt the current goal and accept the new one
   if(current_gh_.isValid() && current_gh_.getGoalStatus().status == actionlib_msgs::GoalStatus::ACTIVE) {
