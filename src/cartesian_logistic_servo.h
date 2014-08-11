@@ -50,7 +50,7 @@ namespace lcsr_controllers {
     // RTT Debug Ports
     RTT::OperationCaller<geometry_msgs::TransformStamped(const std::string&,
       const std::string&)> tf_lookup_transform_;
-    RTT::OperationCaller<geometry_msgs::TransformStamped(const geometry_msgs::TransformStamped&)> 
+    RTT::OperationCaller<void(const geometry_msgs::TransformStamped&)> 
       tf_broadcast_transform_;
 
   public:

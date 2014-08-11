@@ -81,6 +81,15 @@ bool CartesianLogisticServo::configureHook()
     TaskContext* tf_task = this->getPeer("tf");
     tf_lookup_transform_ = tf_task->getOperation("lookupTransform"); // void reset(void)
     tf_broadcast_transform_ = tf_task->getOperation("broadcastTransform"); // void reset(void)
+
+    if(!tf_lookup_transform_.ready()) {
+      RTT::log(RTT::Error) << "Could not get operation `lookupTransform`" << RTT::endlog();
+      return false;
+    }
+    if(!tf_broadcast_transform_.ready()) {
+      RTT::log(RTT::Error) << "Could not get operation `broadcastTransform`" << RTT::endlog();
+      return false;
+    }
   } else {
     ROS_ERROR("CartesianLogisticServo controller is not connected to tf!");
     return false;
@@ -154,7 +163,7 @@ bool CartesianLogisticServo::startHook()
 
 static inline double sigm(const double x, const double s)
 {
-  return s*(2/(1 + exp(-2*x/s)) - 1);
+  return s*(2.0/(1.0 + exp(-2.0*x/s)) - 1.0);
 }
 
 void CartesianLogisticServo::updateHook()
@@ -190,7 +199,7 @@ void CartesianLogisticServo::updateHook()
   tf::transformMsgToKDL(tip_frame_msg_.transform, tip_frame_des_);
 
   // Get the twist required to achieve the goal in one control cycle
-  tip_frame_twist_ = KDL::diff(frame_limited_, tip_frame_des_, period.toSec());
+  tip_frame_twist_ = KDL::diff(frame_limited_, tip_frame_des_, 0.001);
 
   // TODO: Add option to apply joint velocity limits to cartesian velocities
   // based on the jacobian
@@ -208,7 +217,7 @@ void CartesianLogisticServo::updateHook()
 
   // Reintegrate the twist
   if(period.toSec() > 1E-8) {
-    frame_limited_.Integrate(frame_limited_.M.Inverse()*tip_frame_twist_, 1.0/period.toSec());
+    frame_limited_.Integrate(frame_limited_.M.Inverse()*tip_frame_twist_);
     framevel_limited_ = frame_limited_;
   } else {
     RTT::log(RTT::Warning) << "CartesianLogisticServo: Period went backwards or is exceptionally small. Not changing output pose." << RTT::endlog();

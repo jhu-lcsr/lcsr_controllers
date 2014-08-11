@@ -250,6 +250,7 @@ class SingularityRescuer(object):
         plan_req.allowed_planning_time = 0.5
         plan_req.group_name = 'arm'
         #plan_req.planner_id = 'SBLkConfigDefault'
+        plan_req.planner_id = 'RRTConnectkConfigDefault'
         plan_req.start_state.is_diff = False
 
         # add the goal constraints
@@ -277,7 +278,7 @@ class SingularityRescuer(object):
                 for cr in [g.constraint_region]:
                     cr.primitives.append(shape_msgs.SolidPrimitive())
                     cr.primitives[0].type = shape_msgs.SolidPrimitive.SPHERE
-                    cr.primitives[0].dimensions = [0.001]
+                    cr.primitives[0].dimensions = [0.005]
                     # set the target position
                     cr.primitive_poses = [toMsg(fromTf(target_pose))]
 

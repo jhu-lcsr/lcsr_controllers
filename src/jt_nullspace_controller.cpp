@@ -533,7 +533,7 @@ void JTNullspaceController::updateHook()
     if(this->debug_throttle_.ready(0.05)) {
       wrench_msg_.header.frame_id = tip_link_;
       wrench_msg_.header.stamp = rtt_rosclock::host_now();
-      KDL::Wrench tip_wrench = /**frame.Inverse()* **/KDL::Wrench(KDL::Vector(wrench_(0), wrench_(1), wrench_(2)), KDL::Vector(wrench_(3), wrench_(4), wrench_(5)));
+      KDL::Wrench tip_wrench = frame.Inverse()*KDL::Wrench(KDL::Vector(wrench_(0), wrench_(1), wrench_(2)), KDL::Vector(wrench_(3), wrench_(4), wrench_(5)));
       wrench_msg_.wrench.force.x = tip_wrench(0);
       wrench_msg_.wrench.force.y = tip_wrench(1);
       wrench_msg_.wrench.force.z = tip_wrench(2);
