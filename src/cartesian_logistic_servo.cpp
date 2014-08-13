@@ -217,7 +217,7 @@ void CartesianLogisticServo::updateHook()
 
   // Reintegrate the twist
   if(period.toSec() > 1E-8) {
-    frame_limited_.Integrate(frame_limited_.M.Inverse()*tip_frame_twist_);
+    frame_limited_.Integrate(frame_limited_.M.Inverse()*tip_frame_twist_, 1.0/period.toSec());
     framevel_limited_ = frame_limited_;
   } else {
     RTT::log(RTT::Warning) << "CartesianLogisticServo: Period went backwards or is exceptionally small. Not changing output pose." << RTT::endlog();

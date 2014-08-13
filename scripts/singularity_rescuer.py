@@ -153,14 +153,17 @@ class SingularityRescuer(object):
         # update state
         self.state=self.ESCAPING
         # send the joint trajectory command
-        self.follow_trajectory.send_goal(
-                self.joint_trajectory_goal,
-                done_cb=self.escaping_done)
+        if 1:
+            self.follow_trajectory.send_goal(
+                    self.joint_trajectory_goal,
+                    done_cb=self.escaping_done)
 
     def escaping_done(self, goal_state, result):
         # check if the goal succeeded
         if goal_state != GoalStatus.SUCCEEDED:
             rospy.logerr("SingularityRescuer: failed while trying to escape.")
+            self.state = self.NOMINAL
+            return 
         else:
             # get the current tip and target poses
             tip_pose, target_pose = self.get_tip_and_target(rospy.Time.now())
@@ -170,6 +173,8 @@ class SingularityRescuer(object):
                 rospy.loginfo("SingularityRescuer: Completed escape.")
             else:
                 rospy.logwarn("SingularityRescuer: Could not  escape.")
+                self.state = self.NOMINAL
+                return
 
         # switch out of joint mode and back into cartesian mode
         self.state=self.SWITCHING_TO_CART_CONTROL

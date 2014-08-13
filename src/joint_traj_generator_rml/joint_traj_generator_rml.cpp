@@ -41,6 +41,7 @@ JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
   // Behavior
   ,stop_on_violation_(true)
   ,traj_mode_(INACTIVE)
+  ,stop_time_(0.5)
   // RML
   ,rml_zero_(0)
   ,rml_true_(0)
@@ -60,6 +61,7 @@ JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
   this->addProperty("velocity_tolerance",velocity_tolerance_).doc("Maximum velocity error.");
   this->addProperty("sampling_resolution",sampling_resolution_).doc("Sampling resolution in seconds.");
   this->addProperty("stop_on_violation",stop_on_violation_).doc("Stop the trajectory if the tolerances are violated.");
+  this->addProperty("stop_time",stop_time_).doc("The time it should take to stop the arm.");
   this->addProperty("verbose",verbose_).doc("Verbose debug output control.");
   
   // Configure data ports
@@ -189,6 +191,7 @@ bool JointTrajGeneratorRML::configureHook()
     rosparam->getComponentPrivate("sampling_resolution");
     rosparam->getComponentPrivate("verbose");
     rosparam->getComponentPrivate("stop_on_violation");
+    rosparam->getComponentPrivate("stop_time");
   }
   
   // Resize IO vectors
@@ -254,27 +257,6 @@ bool JointTrajGeneratorRML::configureRML(
     RMLLog(RTT::Error, rml_in);
     return false;
   }
-
-  return true;
-}
-
-bool JointTrajGeneratorRML::startHook()
-{
-  segments_.clear();
-
-  joint_position_.setZero();
-  joint_velocity_.setZero();
-  joint_velocity_last_.setZero();
-  joint_acceleration_.setZero();
-
-  joint_position_in_.clear();
-  joint_velocity_in_.clear();
-  joint_position_cmd_in_.clear();
-  joint_traj_point_cmd_in_.clear();
-  joint_traj_cmd_in_.clear();
-
-  // Enable all joints
-  rml_in_->SetSelectionVector(rml_true_);
 
   return true;
 }
@@ -895,6 +877,28 @@ bool JointTrajGeneratorRML::insertSegments(
   return true;
 }
 
+
+bool JointTrajGeneratorRML::startHook()
+{
+  segments_.clear();
+
+  joint_position_.setZero();
+  joint_velocity_.setZero();
+  joint_velocity_last_.setZero();
+  joint_acceleration_.setZero();
+
+  joint_position_in_.clear();
+  joint_velocity_in_.clear();
+  joint_position_cmd_in_.clear();
+  joint_traj_point_cmd_in_.clear();
+  joint_traj_cmd_in_.clear();
+
+  // Enable all joints
+  rml_in_->SetSelectionVector(rml_true_);
+
+  return true;
+}
+
 void JointTrajGeneratorRML::updateHook()
 {
   // Get the current and the time since the last update
@@ -1048,10 +1052,10 @@ void JointTrajGeneratorRML::updateHook()
         this->computeTrajectory(
             rtt_now,
             joint_position_,
+            joint_velocity_,
             joint_zero_,
-            joint_zero_,
-            ros::Duration(0.0),
-            joint_position_,
+            ros::Duration(stop_time_),
+            joint_position_ + joint_velocity_*stop_time_,
             joint_zero_,
             rml_, rml_in_, rml_out_, rml_flags_);
 

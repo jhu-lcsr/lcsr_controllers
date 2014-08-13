@@ -56,6 +56,7 @@ namespace lcsr_controllers {
       max_jerks_;
     bool verbose_;
     bool stop_on_violation_;
+    double stop_time_;
 
     typedef enum {
       INACTIVE = 0,
