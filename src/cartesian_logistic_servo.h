@@ -83,10 +83,18 @@ namespace lcsr_controllers {
 
     geometry_msgs::TransformStamped target_frame_limited_msg_;
     geometry_msgs::TransformStamped tip_frame_msg_;
-    KDL::Frame tip_frame_des_;
+    KDL::Twist tip_frame_error_;
     KDL::Twist tip_frame_twist_;
-    KDL::Frame frame_limited_;
-    KDL::FrameVel framevel_limited_;
+    KDL::Frame tip_frame_des_;
+    KDL::Frame tip_frame_cmd_;
+    KDL::FrameVel tip_framevel_cur_;
+    KDL::FrameVel tip_framevel_des_;
+    KDL::FrameVel tip_framevel_cmd_;
+
+    double linear_position_threshold_;
+    double angular_position_threshold_;
+    double linear_p_gain_;
+    double angular_p_gain_;
 
     rtt_ros_tools::PeriodicThrottle ros_publish_throttle_;
 

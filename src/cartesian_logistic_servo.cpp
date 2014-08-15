@@ -50,6 +50,10 @@ CartesianLogisticServo::CartesianLogisticServo(std::string const& name) :
     .doc("The target frame to track with tip_link.");
   this->addProperty("max_linear_rate",max_linear_rate_);
   this->addProperty("max_angular_rate",max_angular_rate_);
+  this->addProperty("linear_position_threshold",linear_position_threshold_);
+  this->addProperty("linear_p_gain",linear_p_gain_);
+  this->addProperty("angular_position_threshold",angular_position_threshold_);
+  this->addProperty("angular_p_gain",angular_p_gain_);
 
   // Configure data ports
   this->ports()->addPort("positions_in", positions_in_port_)
@@ -69,6 +73,10 @@ bool CartesianLogisticServo::configureHook()
   rosparam->getComponentPrivate("target_frame");
   rosparam->getComponentPrivate("max_linear_rate");
   rosparam->getComponentPrivate("max_angular_rate");
+  rosparam->getComponentPrivate("linear_position_threshold");
+  rosparam->getComponentPrivate("angular_position_threshold");
+  rosparam->getComponentPrivate("linear_p_gain");
+  rosparam->getComponentPrivate("angular_p_gain");
 
   rosparam->getComponentPrivate("robot_description_param");
   rosparam->getParam(robot_description_param_, "robot_description");
@@ -179,13 +187,13 @@ void CartesianLogisticServo::updateHook()
     return;
   }
 
-  // Compute the current target frame
-  fk_solver_vel_->JntToCart(positions_, framevel_limited_);
-  frame_limited_ = framevel_limited_.GetFrame();
+  // Compute the current tip frame
+  fk_solver_vel_->JntToCart(positions_, tip_framevel_cur_);
 
   // Get transform from the root link frame to the target frame
   try{
     tip_frame_msg_ = tf_lookup_transform_("/"+root_link_,target_frame_);
+    tf::transformMsgToKDL(tip_frame_msg_.transform, tip_frame_des_);
     warn_flag_ = false;
   } catch (std::exception &ex) {
     if(!warn_flag_) {
@@ -196,40 +204,63 @@ void CartesianLogisticServo::updateHook()
     return;
   }
 
-  tf::transformMsgToKDL(tip_frame_msg_.transform, tip_frame_des_);
+  // Compute the cartesian position and velocity error
+  KDL::Twist frame_err = KDL::diff(
+      tip_framevel_cur_.GetFrame(), 
+      tip_framevel_des_.GetFrame());
 
-  // Get the twist required to achieve the goal in one control cycle
-  tip_frame_twist_ = KDL::diff(frame_limited_, tip_frame_des_, 0.001);
+  KDL::Twist twist_err = KDL::diff(
+      tip_framevel_cur_.GetTwist(), 
+      tip_framevel_des_.GetTwist());
+
+  // Rotation error
+  Eigen::Vector3d r_err = Eigen::Map<Eigen::Vector3d>(frame_err.rot.data);
+  // Angular velocity error
+  Eigen::Vector3d w_err = Eigen::Map<Eigen::Vector3d>(twist_err.rot.data);
+  // Position error
+  Eigen::Vector3d p_err = Eigen::Map<Eigen::Vector3d>(frame_err.vel.data);
+  // Velocity error
+  Eigen::Vector3d v_err = Eigen::Map<Eigen::Vector3d>(twist_err.vel.data);
+
+  // Check pos/vel tolerances
+  bool linear_position_within_tolerance = p_err.norm() < linear_position_threshold_;
+  bool angular_position_within_tolerance = r_err.norm() < angular_position_threshold_;
+
+  // Re-set the integrated frame if it gets too far away
+  if(!linear_position_within_tolerance || !angular_position_within_tolerance) {
+    tip_framevel_cmd_ = tip_framevel_cur_;
+  }
+
+  // Get the twist error between the command and the integrated frame
+  tip_frame_error_ = KDL::diff(tip_framevel_cmd_.GetFrame(), tip_frame_des_);
 
   // TODO: Add option to apply joint velocity limits to cartesian velocities
   // based on the jacobian
 
   // Compute the scaled twists
-  tip_frame_twist_.vel =
-    tip_frame_twist_.vel 
-    / tip_frame_twist_.vel.Norm()
-    * sigm(tip_frame_twist_.vel.Norm(), max_linear_rate_);
+  tip_frame_twist_.vel = linear_p_gain_ * tip_frame_error_.vel;
+  tip_frame_twist_.vel = tip_frame_twist_.vel / tip_frame_twist_.vel.Norm() * sigm(tip_frame_twist_.vel.Norm(), max_linear_rate_);
 
-  tip_frame_twist_.rot =
-    tip_frame_twist_.rot 
-    / tip_frame_twist_.rot.Norm()
-    * sigm(tip_frame_twist_.rot.Norm(), max_angular_rate_);
+  tip_frame_twist_.rot = angular_p_gain_ * tip_frame_error_.rot;
+  tip_frame_twist_.rot = tip_frame_twist_.rot / tip_frame_twist_.rot.Norm() * sigm(tip_frame_twist_.rot.Norm(), max_angular_rate_);
 
   // Reintegrate the twist
   if(period.toSec() > 1E-8) {
-    frame_limited_.Integrate(frame_limited_.M.Inverse()*tip_frame_twist_, 1.0/period.toSec());
-    framevel_limited_ = frame_limited_;
+    tip_frame_cmd_ = tip_framevel_cmd_.GetFrame();
+    tip_frame_cmd_.Integrate(tip_framevel_cmd_.GetFrame().M.Inverse()*tip_frame_twist_, 1.0/period.toSec());
+    // Set command framevel with zero feed-forward velocity
+    tip_framevel_cmd_ = tip_frame_cmd_;
   } else {
     RTT::log(RTT::Warning) << "CartesianLogisticServo: Period went backwards or is exceptionally small. Not changing output pose." << RTT::endlog();
   }
 
   // Send position target
-  framevel_out_port_.write( framevel_limited_ );
+  framevel_out_port_.write( tip_framevel_cmd_ );
 
   // Publish debug traj to ros
   if(ros_publish_throttle_.ready(0.02)) 
   {
-    tf::transformKDLToMsg(frame_limited_, target_frame_limited_msg_.transform);
+    tf::transformKDLToMsg(tip_frame_cmd_, target_frame_limited_msg_.transform);
     target_frame_limited_msg_.header.stamp = rtt_rosclock::host_now();
     tf_broadcast_transform_(target_frame_limited_msg_);
   }

@@ -24,10 +24,11 @@ class SingularityRescuer(object):
     
     # States
     NOMINAL=0
-    PLANNING_ESCAPE=1
-    SWITCHING_TO_JOINT_CONTROL=2
-    ESCAPING=3
-    SWITCHING_TO_CART_CONTROL=4
+    ESCAPE_NEEDED=1
+    PLANNING_ESCAPE=2
+    SWITCHING_TO_JOINT_CONTROL=3
+    ESCAPING=4
+    SWITCHING_TO_CART_CONTROL=5
 
     def __init__(self):
 
@@ -87,25 +88,21 @@ class SingularityRescuer(object):
         # compute joint limit proximity
         # TODO
 
+        planning_needed = False
+
         # get the current tip and target poses
         tip_pose, target_pose = self.get_tip_and_target(joint_state.header.stamp)
 
         if not tip_pose or not target_pose:
             return
 
-        # check if planning is needed
-        planning_needed = not self.within_tolerance(tip_pose, target_pose)
-
         # check if we're in the nominal state
         if self.state == self.NOMINAL:
-            # if the cartesian error is high enough, request a motion plan
-            if planning_needed:
-                # update the state
-                self.state=self.PLANNING_ESCAPE
-                self.move_group_goal = self.generate_planning_goal(joint_state, tip_pose, target_pose)
-                self.move_group.send_goal(
-                        self.move_group_goal,
-                        done_cb=self.planning_escape_done)
+
+            # check if planning is needed
+            planning_needed = not self.within_tolerance(tip_pose, target_pose)
+        elif self.state == self.ESCAPE_NEEDED:
+            planning_needed = True
 
         elif self.state == self.PLANNING_ESCAPE:
             # if the cartesian error is small enough, preempt the motion plan request
@@ -113,6 +110,15 @@ class SingularityRescuer(object):
         elif self.state == self.ESCAPING:
             # do nothing
             pass
+
+        # if the cartesian error is high enough, request a motion plan
+        if planning_needed:
+            # update the state
+            self.state=self.PLANNING_ESCAPE
+            self.move_group_goal = self.generate_planning_goal(joint_state, tip_pose, target_pose)
+            self.move_group.send_goal(
+                    self.move_group_goal,
+                    done_cb=self.planning_escape_done)
 
     def planning_escape_done(self, goal_state, result):
         # check if the goal succeeded
@@ -126,6 +132,9 @@ class SingularityRescuer(object):
         # construct a joint trajectory goal
         self.joint_trajectory_goal = control_msgs.FollowJointTrajectoryGoal(
                 trajectory=result.planned_trajectory.joint_trajectory)
+        #if self.joint_trajectory_goal.trajectory.points[-1].time_from_start.to_sec() > 5.0:
+            #self.state = self.NOMINAL
+            #return
 
         # check if the end-effector is still close to the starting point of the trajectory
         # TODO
@@ -162,18 +171,18 @@ class SingularityRescuer(object):
         # check if the goal succeeded
         if goal_state != GoalStatus.SUCCEEDED:
             rospy.logerr("SingularityRescuer: failed while trying to escape.")
-            self.state = self.NOMINAL
+            self.state = self.ESCAPE_NEEDED
             return 
         else:
             # get the current tip and target poses
             tip_pose, target_pose = self.get_tip_and_target(rospy.Time.now())
 
             # check if we successfully escaped the singularity
-            if self.within_tolerance(tip_pose, target_pose):
+            if self.within_tolerance(tip_pose, target_pose, 0.1):
                 rospy.loginfo("SingularityRescuer: Completed escape.")
             else:
                 rospy.logwarn("SingularityRescuer: Could not  escape.")
-                self.state = self.NOMINAL
+                self.state = self.ESCAPE_NEEDED
                 return
 
         # switch out of joint mode and back into cartesian mode
@@ -219,7 +228,7 @@ class SingularityRescuer(object):
 
         return (tip_pose, target_pose)
 
-    def within_tolerance(self, tip_pose, target_pose):
+    def within_tolerance(self, tip_pose, target_pose, scale=1.0):
         # compute cartesian command error
         tip_frame = fromTf(tip_pose)
         target_frame = fromTf(target_pose)
@@ -231,7 +240,7 @@ class SingularityRescuer(object):
         #print("linear: %g, angular %g" % (linear_err, angular_err))
 
         # decide if planning is needed
-        return linear_err < self.linear_err_threshold and angular_err < self.angular_err_threshold
+        return linear_err < scale*self.linear_err_threshold and angular_err < scale*self.angular_err_threshold
 
     def generate_planning_goal(self, joint_state, tip_pose, target_pose):
         # create the motion plan request
