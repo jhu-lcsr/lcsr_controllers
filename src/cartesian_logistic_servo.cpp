@@ -166,12 +166,31 @@ bool CartesianLogisticServo::startHook()
 
   // TODO: get last update time from Conman
   last_update_time_ = rtt_rosclock::rtt_now();
+  
+  // Read in the current joint positions
+  RTT::FlowStatus positions_data = positions_in_port_.readNewest( positions_.q.data );
+  if(positions_data != RTT::NewData) {
+    return false;
+  }
+
+  // Compute the current tip frame
+  fk_solver_vel_->JntToCart(positions_, tip_framevel_cur_);
+
+
+  tip_frame_cmd_ = tip_framevel_cur_.GetFrame();
+  tip_frame_cmd_unthrottled_ = tip_framevel_cur_.GetFrame();
+
   return true;
 }
 
 static inline double sigm(const double x, const double s)
 {
   return s*(2.0/(1.0 + exp(-2.0*x/s)) - 1.0);
+}
+
+static inline void sigm_throttle(KDL::Vector &vec, const double s)
+{
+  vec = vec / vec.Norm() * sigm(vec.Norm(), s);
 }
 
 void CartesianLogisticServo::updateHook()
@@ -204,55 +223,38 @@ void CartesianLogisticServo::updateHook()
     return;
   }
 
-  // Compute the cartesian position and velocity error
-  KDL::Twist frame_err = KDL::diff(
-      tip_framevel_cur_.GetFrame(), 
-      tip_framevel_des_.GetFrame());
-
-  KDL::Twist twist_err = KDL::diff(
-      tip_framevel_cur_.GetTwist(), 
-      tip_framevel_des_.GetTwist());
-
-  // Rotation error
-  Eigen::Vector3d r_err = Eigen::Map<Eigen::Vector3d>(frame_err.rot.data);
-  // Angular velocity error
-  Eigen::Vector3d w_err = Eigen::Map<Eigen::Vector3d>(twist_err.rot.data);
-  // Position error
-  Eigen::Vector3d p_err = Eigen::Map<Eigen::Vector3d>(frame_err.vel.data);
-  // Velocity error
-  Eigen::Vector3d v_err = Eigen::Map<Eigen::Vector3d>(twist_err.vel.data);
-
-  // Check pos/vel tolerances
-  bool linear_position_within_tolerance = p_err.norm() < linear_position_threshold_;
-  bool angular_position_within_tolerance = r_err.norm() < angular_position_threshold_;
-
-  // Re-set the integrated frame if it gets too far away
-  if(!linear_position_within_tolerance || !angular_position_within_tolerance) {
-    tip_framevel_cmd_ = tip_framevel_cur_;
-  }
-
   // Get the twist error between the command and the integrated frame
-  tip_frame_error_ = KDL::diff(tip_framevel_cmd_.GetFrame(), tip_frame_des_);
+  t_cmd_des_ = KDL::diff(tip_frame_cmd_unthrottled_, tip_frame_des_);
 
   // TODO: Add option to apply joint velocity limits to cartesian velocities
   // based on the jacobian
 
   // Compute the scaled twists
-  tip_frame_twist_.vel = linear_p_gain_ * tip_frame_error_.vel;
-  tip_frame_twist_.vel = tip_frame_twist_.vel / tip_frame_twist_.vel.Norm() * sigm(tip_frame_twist_.vel.Norm(), max_linear_rate_);
+  t_cmd_diff_.vel = linear_p_gain_ * t_cmd_des_.vel;
+  t_cmd_diff_.rot = angular_p_gain_ * t_cmd_des_.rot;
 
-  tip_frame_twist_.rot = angular_p_gain_ * tip_frame_error_.rot;
-  tip_frame_twist_.rot = tip_frame_twist_.rot / tip_frame_twist_.rot.Norm() * sigm(tip_frame_twist_.rot.Norm(), max_angular_rate_);
+  sigm_throttle(t_cmd_diff_.vel, max_linear_rate_);
+  sigm_throttle(t_cmd_diff_.rot, max_angular_rate_);
 
   // Reintegrate the twist
   if(period.toSec() > 1E-8) {
-    tip_frame_cmd_ = tip_framevel_cmd_.GetFrame();
-    tip_frame_cmd_.Integrate(tip_framevel_cmd_.GetFrame().M.Inverse()*tip_frame_twist_, 1.0/period.toSec());
-    // Set command framevel with zero feed-forward velocity
-    tip_framevel_cmd_ = tip_frame_cmd_;
+    // Integrate the additional twist
+    tip_frame_cmd_unthrottled_.Integrate(tip_frame_cmd_unthrottled_.M.Inverse()*t_cmd_diff_, 1.0/period.toSec());
+
+    // Scale back towards current pose
+    KDL::Twist t_cur_cmd = KDL::diff(tip_framevel_cur_.GetFrame(), tip_frame_cmd_unthrottled_);
+    sigm_throttle(t_cur_cmd.vel, linear_position_threshold_);
+    sigm_throttle(t_cur_cmd.rot, angular_position_threshold_);
+
+    tip_frame_cmd_ = tip_framevel_cur_.GetFrame();
+    tip_frame_cmd_.Integrate(tip_frame_cmd_.M.Inverse()*t_cur_cmd, 1.0);
+
   } else {
     RTT::log(RTT::Warning) << "CartesianLogisticServo: Period went backwards or is exceptionally small. Not changing output pose." << RTT::endlog();
   }
+
+  // Set command framevel with zero feed-forward velocity
+  tip_framevel_cmd_ = tip_frame_cmd_;
 
   // Send position target
   framevel_out_port_.write( tip_framevel_cmd_ );
