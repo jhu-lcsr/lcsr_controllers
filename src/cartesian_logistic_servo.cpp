@@ -50,9 +50,9 @@ CartesianLogisticServo::CartesianLogisticServo(std::string const& name) :
     .doc("The target frame to track with tip_link.");
   this->addProperty("max_linear_rate",max_linear_rate_);
   this->addProperty("max_angular_rate",max_angular_rate_);
-  this->addProperty("linear_position_threshold",linear_position_threshold_);
+  this->addProperty("linear_position_threshold",max_linear_error_);
   this->addProperty("linear_p_gain",linear_p_gain_);
-  this->addProperty("angular_position_threshold",angular_position_threshold_);
+  this->addProperty("angular_position_threshold",max_angular_error_);
   this->addProperty("angular_p_gain",angular_p_gain_);
 
   // Configure data ports
@@ -178,7 +178,7 @@ bool CartesianLogisticServo::startHook()
 
 
   tip_frame_cmd_ = tip_framevel_cur_.GetFrame();
-  tip_frame_cmd_unthrottled_ = tip_framevel_cur_.GetFrame();
+  tip_frame_cmd_unbounded_ = tip_framevel_cur_.GetFrame();
 
   return true;
 }
@@ -188,7 +188,7 @@ static inline double sigm(const double x, const double s)
   return s*(2.0/(1.0 + exp(-2.0*x/s)) - 1.0);
 }
 
-static inline void sigm_throttle(KDL::Vector &vec, const double s)
+static inline void sigm_scale(KDL::Vector &vec, const double s)
 {
   vec = vec / vec.Norm() * sigm(vec.Norm(), s);
 }
@@ -206,10 +206,10 @@ void CartesianLogisticServo::updateHook()
     return;
   }
 
-  // Compute the current tip frame
+  // Compute the current tip pose in the base frame
   fk_solver_vel_->JntToCart(positions_, tip_framevel_cur_);
 
-  // Get transform from the root link frame to the target frame
+  // Get thep current desired pose in the base frame
   try{
     tip_frame_msg_ = tf_lookup_transform_("/"+root_link_,target_frame_);
     tf::transformMsgToKDL(tip_frame_msg_.transform, tip_frame_des_);
@@ -223,28 +223,35 @@ void CartesianLogisticServo::updateHook()
     return;
   }
 
-  // Get the twist error between the command and the integrated frame
-  t_cmd_des_ = KDL::diff(tip_frame_cmd_unthrottled_, tip_frame_des_);
+  // Get the twist from the unthrottled pose to the desired pose
+  t_cmd_des_ = KDL::diff(tip_frame_cmd_unbounded_, tip_frame_des_);
 
-  // TODO: Add option to apply joint velocity limits to cartesian velocities
-  // based on the jacobian
-
-  // Compute the scaled twists
+  // Scale the twist by a proportional velocity law
   t_cmd_diff_.vel = linear_p_gain_ * t_cmd_des_.vel;
   t_cmd_diff_.rot = angular_p_gain_ * t_cmd_des_.rot;
 
-  sigm_throttle(t_cmd_diff_.vel, max_linear_rate_);
-  sigm_throttle(t_cmd_diff_.rot, max_angular_rate_);
+  // Throttle the twist according to maximum linear and angular rates
+  sigm_scale(t_cmd_diff_.vel, max_linear_rate_);
+  sigm_scale(t_cmd_diff_.rot, max_angular_rate_);
 
   // Reintegrate the twist
   if(period.toSec() > 1E-8) {
-    // Integrate the additional twist
-    tip_frame_cmd_unthrottled_.Integrate(tip_frame_cmd_unthrottled_.M.Inverse()*t_cmd_diff_, 1.0/period.toSec());
+    // Integrate the additional twist in the unbounded command frame
+    tip_frame_cmd_unbounded_.Integrate(tip_frame_cmd_unbounded_.M.Inverse()*t_cmd_diff_, 1.0/period.toSec());
 
-    // Scale back towards current pose
-    KDL::Twist t_cur_cmd = KDL::diff(tip_framevel_cur_.GetFrame(), tip_frame_cmd_unthrottled_);
-    sigm_throttle(t_cur_cmd.vel, linear_position_threshold_);
-    sigm_throttle(t_cur_cmd.rot, angular_position_threshold_);
+    // Get the twist from the current frame to the unbounded command frame
+    KDL::Twist t_cur_cmd = KDL::diff(tip_framevel_cur_.GetFrame(), tip_frame_cmd_unbounded_);
+
+    // Check if the twist from the current frame to the unbounded integrated frame has flipped direction
+    if(KDL::dot(t_cur_cmd_last_.rot, t_cur_cmd.rot) < 0) {
+      //t_cur_cmd.rot = -1.0 * t_cur_cmd.rot;
+      RTT::log(RTT::Error) << "FLIP" <<RTT::endlog();
+    }
+    t_cur_cmd_last_ = t_cur_cmd;
+    
+    // Bound the command twist by the maximum error
+    sigm_scale(t_cur_cmd.vel, max_linear_error_);
+    sigm_scale(t_cur_cmd.rot, max_angular_error_);
 
     tip_frame_cmd_ = tip_framevel_cur_.GetFrame();
     tip_frame_cmd_.Integrate(tip_frame_cmd_.M.Inverse()*t_cur_cmd, 1.0);
