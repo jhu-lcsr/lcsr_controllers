@@ -198,6 +198,10 @@ static inline void sigm_scale(KDL::Vector &vec, const double s)
   vec = vec / vec.Norm() * sigm(vec.Norm(), s);
 }
 
+static inline double sign(double &v) {
+  return v > 0.0 ? 1.0 : -1.0;
+}
+
 void CartesianLogisticServo::updateHook()
 {
   // Compute the inverse kinematics solution
@@ -246,6 +250,12 @@ void CartesianLogisticServo::updateHook()
 
     // Get the twist from the current frame to the unbounded command frame
     KDL::Twist t_cur_cmd = KDL::diff(tip_framevel_cur_.GetFrame(), tip_frame_cmd_unbounded_);
+
+    double cur_cmd_angle = t_cur_cmd.rot.Norm();
+    t_cur_cmd = 
+      t_cur_cmd
+      *sign(cur_cmd_angle)
+      *std::min(std::abs(cur_cmd_angle), M_PI-std::abs(cur_cmd_angle));
 
     // Check if the twist from the current frame to the unbounded integrated frame has flipped direction
     if(KDL::dot(t_cur_cmd_last_.rot, t_cur_cmd.rot) < 0) {
