@@ -49,10 +49,10 @@ CartesianLogisticServo::CartesianLogisticServo(std::string const& name) :
   this->addProperty("target_frame",target_frame_)
     .doc("The target frame to track with tip_link.");
   this->addProperty("max_linear_rate",max_linear_rate_);
+  this->addProperty("max_linear_error",max_linear_error_);
   this->addProperty("max_angular_rate",max_angular_rate_);
-  this->addProperty("linear_position_threshold",max_linear_error_);
+  this->addProperty("max_angular_error",max_angular_error_);
   this->addProperty("linear_p_gain",linear_p_gain_);
-  this->addProperty("angular_position_threshold",max_angular_error_);
   this->addProperty("angular_p_gain",angular_p_gain_);
 
   // Configure data ports
@@ -72,9 +72,9 @@ bool CartesianLogisticServo::configureHook()
   rosparam->getComponentPrivate("tip_link");
   rosparam->getComponentPrivate("target_frame");
   rosparam->getComponentPrivate("max_linear_rate");
+  rosparam->getComponentPrivate("max_linear_error");
   rosparam->getComponentPrivate("max_angular_rate");
-  rosparam->getComponentPrivate("linear_position_threshold");
-  rosparam->getComponentPrivate("angular_position_threshold");
+  rosparam->getComponentPrivate("max_angular_error");
   rosparam->getComponentPrivate("linear_p_gain");
   rosparam->getComponentPrivate("angular_p_gain");
 
@@ -159,10 +159,15 @@ bool CartesianLogisticServo::startHook()
 
   // Zero velocity estimate
   positions_.qdot.data.setZero();
-
+  // Zero last twist
+  t_cur_cmd_last_.rot = KDL::Vector::Zero();
+  t_cmd_unbounded_ = KDL::Twist::Zero();
   // Initialize TF message
   target_frame_limited_msg_.header.frame_id = root_link_;
   target_frame_limited_msg_.child_frame_id = target_frame_+"_limited";
+
+  target_frame_unbounded_msg_.header.frame_id = root_link_;
+  target_frame_unbounded_msg_.child_frame_id = target_frame_+"_unbounded";
 
   // TODO: get last update time from Conman
   last_update_time_ = rtt_rosclock::rtt_now();
@@ -272,6 +277,10 @@ void CartesianLogisticServo::updateHook()
     tf::transformKDLToMsg(tip_frame_cmd_, target_frame_limited_msg_.transform);
     target_frame_limited_msg_.header.stamp = rtt_rosclock::host_now();
     tf_broadcast_transform_(target_frame_limited_msg_);
+
+    tf::transformKDLToMsg(tip_frame_cmd_unbounded_, target_frame_unbounded_msg_.transform);
+    target_frame_unbounded_msg_.header.stamp = rtt_rosclock::host_now();
+    tf_broadcast_transform_(target_frame_unbounded_msg_);
   }
 }
 

@@ -82,12 +82,14 @@ namespace lcsr_controllers {
     boost::shared_ptr<KDL::ChainJntToJacSolver> jac_solver_;
 
     geometry_msgs::TransformStamped target_frame_limited_msg_;
+    geometry_msgs::TransformStamped target_frame_unbounded_msg_;
     geometry_msgs::TransformStamped tip_frame_msg_;
     KDL::Twist tip_frame_error_;
     KDL::Twist tip_frame_twist_;
     KDL::Twist t_cmd_des_;
     KDL::Twist t_cmd_diff_;
     KDL::Twist t_cur_cmd_last_;
+    KDL::Twist t_cmd_unbounded_;
     KDL::Frame tip_frame_des_;
     KDL::Frame tip_frame_cmd_;
     KDL::Frame tip_frame_cmd_unbounded_;
