@@ -23,6 +23,7 @@
 #include <geometry_msgs/WrenchStamped.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <visualization_msgs/Marker.h>
+#include <sensor_msgs/JointState.h>
 
 namespace lcsr_controllers {
   /**
@@ -50,6 +51,7 @@ namespace lcsr_controllers {
     RTT::InputPort<geometry_msgs::PoseStamped> pose_desired_in_;
     RTT::OutputPort<geometry_msgs::PoseStamped> err_pose_debug_out_;
     RTT::OutputPort<geometry_msgs::WrenchStamped> err_wrench_debug_out_;
+    RTT::OutputPort<sensor_msgs::JointState> effort_debug_out_;
 
   public:
     JTNullspaceController(std::string const& name);
@@ -136,6 +138,7 @@ namespace lcsr_controllers {
     geometry_msgs::WrenchStamped wrench_msg_;
     geometry_msgs::PoseStamped pose_err_msg_;
     geometry_msgs::PoseStamped pose_msg_;
+    sensor_msgs::JointState joint_state_msg_;
 
     rtt_ros_tools::PeriodicThrottle debug_throttle_;
 

@@ -142,6 +142,9 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
 
   this->ports()->addPort("pose_desired_in", pose_desired_in_);
   pose_desired_in_.createStream(rtt_roscomm::topic("~/"+this->getName()+"/pose_desired"));
+
+  this->ports()->addPort("effort_debug_out", effort_debug_out_);
+  effort_debug_out_.createStream(rtt_roscomm::topic("~/"+this->getName()+"/joint_state"));
 }
 
 bool JTNullspaceController::configureHook()
@@ -234,6 +237,10 @@ bool JTNullspaceController::configureHook()
   jacobian_.resize(n_dof_);
   joint_inertia_.resize(n_dof_);
   joint_d_gains_.resize(n_dof_);
+
+  joint_state_msg_.position.resize(n_dof_);
+  joint_state_msg_.velocity.resize(n_dof_);
+  joint_state_msg_.effort.resize(n_dof_);
 
   // Prepare ports for realtime processing
   joint_effort_out_.setDataSample(joint_effort_);
@@ -548,6 +555,13 @@ void JTNullspaceController::updateHook()
       pose_err_msg_.header.stamp = rtt_rosclock::host_now();
       tf::poseKDLToMsg(frame_err_,pose_err_msg_.pose);
       err_pose_debug_out_.write(pose_err_msg_);
+
+      joint_state_msg_.header.frame_id = root_link_;
+      joint_state_msg_.header.stamp = rtt_rosclock::host_now();
+      for(unsigned i=0; i < n_dof_; i++) {
+        joint_state_msg_.effort[i] = joint_effort_(i);
+      }
+      effort_debug_out_.write(joint_state_msg_);
     }
   }
 }
