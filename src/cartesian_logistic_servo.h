@@ -86,12 +86,14 @@ namespace lcsr_controllers {
     geometry_msgs::TransformStamped tip_frame_msg_;
     KDL::Twist tip_frame_error_;
     KDL::Twist tip_frame_twist_;
+    KDL::Twist t_cmd_;
     KDL::Twist t_cmd_des_;
     KDL::Twist t_cmd_diff_;
     KDL::Twist t_cur_cmd_last_;
     KDL::Twist t_cmd_unbounded_;
     KDL::Frame tip_frame_des_;
     KDL::Frame tip_frame_cmd_;
+    KDL::Frame tip_frame_cmd_last_;
     KDL::Frame tip_frame_cmd_unbounded_;
     KDL::FrameVel tip_framevel_cur_;
     KDL::FrameVel tip_framevel_des_;

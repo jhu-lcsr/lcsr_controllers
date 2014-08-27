@@ -291,9 +291,11 @@ void CartesianLogisticServo::updateHook()
     sigm_scale(t_cur_cmd.vel, max_linear_error_);
     sigm_scale(t_cur_cmd.rot, max_angular_error_);
 
+    tip_frame_cmd_last_ = tip_frame_cmd_;
     tip_frame_cmd_ = tip_framevel_cur_.GetFrame();
     tip_frame_cmd_.Integrate(tip_frame_cmd_.M.Inverse()*t_cur_cmd, 1.0);
 
+    t_cmd_ = diff(tip_frame_cmd_last_, tip_frame_cmd_);
   } else {
     RTT::log(RTT::Warning) << "CartesianLogisticServo: Period went backwards or is exceptionally small. Not changing output pose." << RTT::endlog();
   }
@@ -305,8 +307,10 @@ void CartesianLogisticServo::updateHook()
     RTT::log(RTT::Warning) << "CartesianLogisticServo: NaNs detected. Not changing output pose." << RTT::endlog();
   }
 
-  // Set command framevel with zero feed-forward velocity
+  // Set command framevel
   tip_framevel_cmd_ = tip_frame_cmd_;
+  tip_framevel_cmd_.M.w = t_cmd_.rot;
+  tip_framevel_cmd_.p.v = t_cmd_.vel;
 
   // Send position target
   framevel_out_port_.write( tip_framevel_cmd_ );

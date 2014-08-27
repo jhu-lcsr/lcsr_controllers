@@ -47,6 +47,7 @@ namespace lcsr_controllers {
     RTT::InputPort<KDL::FrameVel> pose_twist_in_;
     RTT::InputPort<Eigen::VectorXd> joint_posture_in_;
     RTT::OutputPort<Eigen::VectorXd> joint_effort_out_;
+    RTT::OutputPort<Eigen::VectorXd> joint_velocity_des_out_;
 
     RTT::InputPort<geometry_msgs::PoseStamped> pose_desired_in_;
     RTT::OutputPort<geometry_msgs::PoseStamped> err_pose_debug_out_;
@@ -125,9 +126,11 @@ namespace lcsr_controllers {
       joint_position_,
       joint_velocity_,
       wrench_,
+      twist_,
       joint_effort_,
       joint_effort_raw_,
       joint_effort_null_,
+      joint_velocity_des_,
       joint_d_gains_,
       joint_p_gains_,
       joint_limits_min_,

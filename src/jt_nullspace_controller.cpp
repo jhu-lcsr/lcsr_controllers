@@ -132,6 +132,7 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   this->ports()->addPort("joint_posture_in", joint_posture_in_);
   this->ports()->addPort("framevel_in", pose_twist_in_);
   this->ports()->addPort("joint_effort_out", joint_effort_out_);
+  this->ports()->addPort("joint_velocity_des_out", joint_velocity_des_out_);
 
   // Add the port and stream it to a ROS topic
   this->ports()->addPort("err_wrench_debug_out", err_wrench_debug_out_);
@@ -143,7 +144,7 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   this->ports()->addPort("pose_desired_in", pose_desired_in_);
   pose_desired_in_.createStream(rtt_roscomm::topic("~/"+this->getName()+"/pose_desired"));
 
-  this->ports()->addPort("effort_debug_out", effort_debug_out_);
+  this->ports()->addPort("joint_state_des_debug_out", effort_debug_out_);
   effort_debug_out_.createStream(rtt_roscomm::topic("~/"+this->getName()+"/joint_state"));
 }
 
@@ -232,6 +233,8 @@ bool JTNullspaceController::configureHook()
   joint_effort_null_.resize(n_dof_);
 
   // Resize working vectors
+  wrench_.resize(6);
+  twist_.resize(6);
   velocities_.resize(n_dof_);
   posvel_.resize(n_dof_);
   jacobian_.resize(n_dof_);
@@ -324,6 +327,12 @@ void JTNullspaceController::updateHook()
     KDL::Twist twist = framevel_.GetTwist();
     KDL::Twist twist_des = framevel_desired_.GetTwist();
     KDL::Twist twist_err = KDL::diff(twist, twist_des);
+
+    // Store eigen twist
+    for(unsigned i=0;i<3;i++) {
+      twist_(i) = twist.vel.data[i];
+      twist_(i+3) = twist.rot.data[i];
+    }
 
     // Rotation error
     Eigen::Vector3d r_err = Eigen::Map<Eigen::Vector3d>(frame_err.rot.data);
@@ -533,8 +542,22 @@ void JTNullspaceController::updateHook()
       joint_effort_.setZero();
     }
 
-    // Send joint positions
+    // Send joint efforts
     joint_effort_out_.write( joint_effort_ );
+
+    // Compute desired velocity
+    Eigen::MatrixXd Ja(n_dof_, n_dof_), Ja_inv(n_dof_, n_dof_);
+    Eigen::VectorXd twist_a_(n_dof_);
+
+    Ja.topRows(6) = J;
+    Ja.bottomRows(n_dof_-6) = Z;
+    Ja_inv = Ja.inverse();
+
+    twist_a_.head(6) = twist_;
+    twist_a_.tail(n_dof_-6).setZero();
+
+    joint_velocity_des_ = Ja*twist_a_;
+    joint_velocity_des_out_.write( joint_velocity_des_ );
 
     // Debug visualization
     if(this->debug_throttle_.ready(0.05)) {
@@ -559,6 +582,7 @@ void JTNullspaceController::updateHook()
       joint_state_msg_.header.frame_id = root_link_;
       joint_state_msg_.header.stamp = rtt_rosclock::host_now();
       for(unsigned i=0; i < n_dof_; i++) {
+        joint_state_msg_.velocity[i] = joint_velocity_des_(i);
         joint_state_msg_.effort[i] = joint_effort_(i);
       }
       effort_debug_out_.write(joint_state_msg_);
