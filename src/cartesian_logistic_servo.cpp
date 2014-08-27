@@ -191,12 +191,15 @@ bool CartesianLogisticServo::startHook()
 
 static inline double sigm(const double x, const double s)
 {
-  return s*(2.0/(1.0 + exp(-2.0*x/s)) - 1.0);
+  const double &v = s*(2.0/(1.0 + exp(-2.0*x/s)) - 1.0);
+  return v;
 }
 
 static inline void sigm_scale(KDL::Vector &vec, const double s)
 {
-  vec = vec / vec.Norm() * sigm(vec.Norm(), s);
+  const double n = sigm(vec.Norm(), s);
+  vec.Normalize();
+  vec = vec * n;
 }
 
 static inline double sign(double &v) {
@@ -226,6 +229,19 @@ static inline bool isnan(KDL::Frame &F) {
   return false;
 }
 
+static inline bool isnan(geometry_msgs::TransformStamped &T) {
+  const geometry_msgs::Vector3 &t = T.transform.translation;
+  const geometry_msgs::Quaternion &q = T.transform.rotation;
+  return 
+    isnan(t.x) ||
+    isnan(t.y) ||
+    isnan(t.z) ||
+    isnan(q.x) ||
+    isnan(q.y) ||
+    isnan(q.z) ||
+    isnan(q.w);
+}
+
 void CartesianLogisticServo::updateHook()
 {
   // Compute the inverse kinematics solution
@@ -245,6 +261,10 @@ void CartesianLogisticServo::updateHook()
   // Get thep current desired pose in the base frame
   try{
     tip_frame_msg_ = tf_lookup_transform_("/"+root_link_,target_frame_);
+    if(isnan(tip_frame_msg_)) {
+      RTT::log(RTT::Fatal) << "Transform contained NaNs! Fleeing." <<RTT::endlog();
+      return;
+    }
     tf::transformMsgToKDL(tip_frame_msg_.transform, tip_frame_des_);
     warn_flag_ = false;
   } catch (std::exception &ex) {
@@ -276,9 +296,9 @@ void CartesianLogisticServo::updateHook()
     KDL::Twist t_cur_cmd = KDL::diff(tip_framevel_cur_.GetFrame(), tip_frame_cmd_unbounded_);
 
     double cur_cmd_angle = t_cur_cmd.rot.Norm();
-    t_cur_cmd.rot = 
-      t_cur_cmd.rot/cur_cmd_angle
-      *std::min(std::abs(cur_cmd_angle), M_PI-std::abs(cur_cmd_angle));
+    double reflected_cur_cmd_angle = std::min(std::abs(cur_cmd_angle), M_PI-std::abs(cur_cmd_angle));
+    t_cur_cmd.rot.Normalize();
+    t_cur_cmd.rot = t_cur_cmd.rot * reflected_cur_cmd_angle;
 
     // Check if the twist from the current frame to the unbounded integrated frame has flipped direction
     if(KDL::dot(t_cur_cmd_last_.rot, t_cur_cmd.rot) < 0) {
@@ -304,7 +324,9 @@ void CartesianLogisticServo::updateHook()
   if(isnan(tip_frame_cmd_) || isnan(tip_frame_cmd_unbounded_)) {
     // Re-set the frame
     tip_frame_cmd_unbounded_ = tip_framevel_cur_.GetFrame();
-    RTT::log(RTT::Warning) << "CartesianLogisticServo: NaNs detected. Not changing output pose." << RTT::endlog();
+    RTT::log(RTT::Fatal) << "CartesianLogisticServo: NaNs detected. Run for the hills." << RTT::endlog();
+    this->error();
+    return;
   }
 
   // Set command framevel

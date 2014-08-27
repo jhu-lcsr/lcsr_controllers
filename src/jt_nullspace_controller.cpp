@@ -240,6 +240,7 @@ bool JTNullspaceController::configureHook()
   jacobian_.resize(n_dof_);
   joint_inertia_.resize(n_dof_);
   joint_d_gains_.resize(n_dof_);
+  joint_velocity_des_.resize(n_dof_);
 
   joint_state_msg_.position.resize(n_dof_);
   joint_state_msg_.velocity.resize(n_dof_);
@@ -377,6 +378,9 @@ void JTNullspaceController::updateHook()
     dur_compute_eff_ = ts->secondsSince(tic);
       tic = ts->getTicks();
 
+    Eigen::HouseholderQR<MatrixJ6d> J_t_qr;
+    J_t_qr.compute(J_t);
+
     // Compute nullspace effort (to be projected)
     // This is based on:
     // Springer Tracts in Advanced Robotics: Volume 49 
@@ -386,7 +390,8 @@ void JTNullspaceController::updateHook()
       joint_effort_null_.setZero();
 
       // Compute nullspace basis
-      Z = Eigen::MatrixXd(J_t.householderQr().householderQ()).rightCols(n_dof_-6).transpose();
+      // J_t = QR --> gives nullspace of J
+      Z = Eigen::MatrixXd(J_t_qr.householderQ()).rightCols(n_dof_-6).transpose();
 
       dur_compute_nullspace_basis_ = ts->secondsSince(tic);
       tic = ts->getTicks();
@@ -549,14 +554,24 @@ void JTNullspaceController::updateHook()
     Eigen::MatrixXd Ja(n_dof_, n_dof_), Ja_inv(n_dof_, n_dof_);
     Eigen::VectorXd twist_a_(n_dof_);
 
+#if 0
     Ja.topRows(6) = J;
     Ja.bottomRows(n_dof_-6) = Z;
-    Ja_inv = Ja.inverse();
-
     twist_a_.head(6) = twist_;
     twist_a_.tail(n_dof_-6).setZero();
 
-    joint_velocity_des_ = Ja*twist_a_;
+    joint_velocity_des_ = Ja.householderQr().solve(twist_a_);
+#else
+    KDL::JntArray qdot_des(n_dof_);
+    KDL::Twist t_des();
+    t_des.vel[0] = twist_[0];
+    t_des.vel[1] = twist_[1];
+    t_des.vel[2] = twist_[2];
+    t_des.rot[0] = twist_[3];
+    t_des.rot[1] = twist_[4];
+    t_des.rot[2] = twist_[5];
+#endif
+
     joint_velocity_des_out_.write( joint_velocity_des_ );
 
     // Debug visualization
