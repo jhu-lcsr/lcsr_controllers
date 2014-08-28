@@ -561,15 +561,6 @@ void JTNullspaceController::updateHook()
     twist_a_.tail(n_dof_-6).setZero();
 
     joint_velocity_des_ = Ja.householderQr().solve(twist_a_);
-#else
-    KDL::JntArray qdot_des(n_dof_);
-    KDL::Twist t_des();
-    t_des.vel[0] = twist_[0];
-    t_des.vel[1] = twist_[1];
-    t_des.vel[2] = twist_[2];
-    t_des.rot[0] = twist_[3];
-    t_des.rot[1] = twist_[4];
-    t_des.rot[2] = twist_[5];
 #endif
 
     joint_velocity_des_out_.write( joint_velocity_des_ );

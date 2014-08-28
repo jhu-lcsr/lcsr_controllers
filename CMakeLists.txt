@@ -63,9 +63,11 @@ target_link_libraries( ${PROJECT_NAME} ${COMPONENT_LIBS} lcsr_controllers_fricti
 
 orocos_component(lcsr_controllers_jt_nullspace_controller src/jt_nullspace_controller.cpp)
 orocos_component(lcsr_controllers_cartesian_logistic_servo src/cartesian_logistic_servo.cpp)
+orocos_component(lcsr_controllers_coulomb_compensator src/coulomb_compensator.cpp)
 
 target_link_libraries(lcsr_controllers_jt_nullspace_controller ${COMPONENT_LIBS} lcsr_controllers_friction)
 target_link_libraries(lcsr_controllers_cartesian_logistic_servo ${COMPONENT_LIBS})
+target_link_libraries(lcsr_controllers_coulomb_compensator ${COMPONENT_LIBS})
 
 add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_generate_messages_cpp)
 
