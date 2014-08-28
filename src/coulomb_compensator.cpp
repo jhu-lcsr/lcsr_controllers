@@ -71,7 +71,7 @@ CoulombCompensator::CoulombCompensator(std::string const& name) :
     .doc("The slope of the step function approximation at zero velocity.");
 
   // Configure data ports
-  this->ports()->addPort("position_in", joint_position_in_)
+  this->ports()->addPort("joint_position_in", joint_position_in_)
     .doc("Input port: nx1 vector of joint position. (n joints)");
   this->ports()->addPort("framevel_des_in", framevel_des_in_)
     .doc("Input port: Desired frame and twist.");
@@ -126,10 +126,10 @@ bool CoulombCompensator::configureHook()
   joint_position_.resize(n_dof_);
   joint_limits_min_.resize(n_dof_);
   joint_limits_max_.resize(n_dof_);
-  joint_velocitiy_des_.resize(n_dof_);
+  joint_velocity_des_.resize(n_dof_);
   joint_effort_.resize(n_dof_);
-  friction_coefficients_neg_.resize(n_dof);
-  friction_coefficients_pos_.resize(n_dpf);
+  friction_coefficients_neg_.resize(n_dof_);
+  friction_coefficients_pos_.resize(n_dof_);
 
   rosparam->getComponentPrivate("friction_coefficients_neg");
   rosparam->getComponentPrivate("friction_coefficients_pos");
@@ -161,6 +161,10 @@ bool CoulombCompensator::configureHook()
         150));
 #endif
 
+  joint_state_des_.position.resize(n_dof_);
+  joint_state_des_.velocity.resize(n_dof_);
+  joint_state_des_.effort.resize(n_dof_);
+
   return true;
 }
 
@@ -190,7 +194,7 @@ void CoulombCompensator::updateHook()
   bool ik_ret = kdl_ik_solver_vel_->CartToJnt(
       joint_position_, 
       tip_twist_des_, 
-      joint_velocitiy_des_);
+      joint_velocity_des_);
 
   if(ik_ret < 0) {
     return;
@@ -199,7 +203,7 @@ void CoulombCompensator::updateHook()
   // Compute the colomb force for each joint
   for(unsigned i=0; i<n_dof_; i++) {
     joint_effort_(i) = sigm(
-        joint_velocitiy_des_.data(i), 
+        joint_velocity_des_.data(i), 
         friction_coefficients_neg_(i),
         friction_coefficients_pos_(i),
         zero_slope_);
@@ -209,30 +213,24 @@ void CoulombCompensator::updateHook()
   joint_effort_out_.write( joint_effort_ );
 
   // Publish debug traj to ros
-#if 0
   if(ros_publish_throttle_.ready(0.02)) 
   {
-    // Send traj target
-    if(trajectories_out_.connected()) {
-      trajectory_.header.stamp = ros::Time(0,0);
-
-      for(size_t i=0; i<n_dof_; i++) {
-        trajectory_.points[0].position[i] = position_des_.q(i);
-        trajectory_.points[0].velocities[i] = position_des_.qdot(i);
-      }
-
-      trajectories_out_.write( trajectory_ );
-    }
-
     // Publish controller des state
     joint_state_des_.header.stamp = rtt_rosclock::host_now();
-    joint_state_des_.position.resize(n_dof_);
-    joint_state_des_.velocity.resize(n_dof_);
-    std::copy(position_des_.q.data.data(), position_des_.q.data.data() + n_dof_, joint_state_des_.position.begin());
-    std::copy(position_des_.qdot.data.data(), position_des_.qdot.data.data() + n_dof_, joint_state_des_.velocity.begin());
+    std::copy(
+        joint_position_.data.data(), 
+        joint_position_.data.data() + n_dof_, 
+        joint_state_des_.position.begin());
+    std::copy(
+        joint_velocity_des_.data.data(), 
+        joint_velocity_des_.data.data() + n_dof_, 
+        joint_state_des_.velocity.begin());
+    std::copy(
+        joint_effort_.data(), 
+        joint_effort_.data() + n_dof_, 
+        joint_state_des_.effort.begin());
     joint_state_des_out_.write(joint_state_des_);
   }
-#endif
 }
 
 void CoulombCompensator::stopHook()

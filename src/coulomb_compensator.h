@@ -45,6 +45,7 @@ namespace lcsr_controllers {
     RTT::InputPort<KDL::FrameVel> framevel_des_in_;
     RTT::OutputPort<Eigen::VectorXd> joint_effort_out_;
     RTT::OutputPort<sensor_msgs::JointState> joint_state_des_out_;
+    RTT::OutputPort<geometry_msgs::TwistStamped> twist_des_out_;
 
   public:
     CoulombCompensator(std::string const& name);
@@ -75,7 +76,7 @@ namespace lcsr_controllers {
     KDL::JntArray joint_position_;
     KDL::FrameVel framevel_des_;
     KDL::Twist tip_twist_des_;
-    KDL::JntArray joint_velocitiy_des_;
+    KDL::JntArray joint_velocity_des_;
     Eigen::VectorXd joint_effort_;
 
     // Joint limits
@@ -86,6 +87,7 @@ namespace lcsr_controllers {
     boost::shared_ptr<KDL::ChainIkSolverVel> kdl_ik_solver_vel_;
 
     sensor_msgs::JointState joint_state_des_;
+    geometry_msgs::TwistStamped twist_msg_des_;
 
     rtt_ros_tools::PeriodicThrottle ros_publish_throttle_;
 
