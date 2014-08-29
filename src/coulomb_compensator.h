@@ -73,6 +73,7 @@ namespace lcsr_controllers {
     KDL::Tree kdl_tree_;
     //urdf::Model urdf_model_;
     double zero_slope_;
+    double cutoff_;
 
     // Working variables
     KDL::JntArray joint_position_;

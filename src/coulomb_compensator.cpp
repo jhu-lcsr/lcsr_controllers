@@ -69,6 +69,7 @@ CoulombCompensator::CoulombCompensator(std::string const& name) :
     .doc("Friction coefficients for velocities > 0.");
   this->addProperty("zero_slope",zero_slope_)
     .doc("The slope of the step function approximation at zero velocity.");
+  this->addProperty("cutoff",cutoff_);
 
   // Configure data ports
   this->ports()->addPort("joint_position_in", joint_position_in_)
@@ -93,6 +94,7 @@ bool CoulombCompensator::configureHook()
   rosparam->getComponentPrivate("root_link");
   rosparam->getComponentPrivate("tip_link");
   rosparam->getComponentPrivate("zero_slope");
+  rosparam->getComponentPrivate("cutoff");
 
   rosparam->getComponentPrivate("robot_description_param");
   rosparam->getParam(robot_description_param_, "robot_description");
@@ -181,6 +183,8 @@ bool CoulombCompensator::startHook()
 {
   // Zero out data
   KDL::SetToZero(joint_position_);
+  joint_effort_.setZero();
+  KDL::SetToZero(tip_twist_des_);
   return true;
 }
 
@@ -219,7 +223,7 @@ void CoulombCompensator::updateHook()
 
   // Compute the colomb force for each joint
   for(unsigned i=0; i<n_dof_; i++) {
-    joint_effort_(i) = sigm(
+    joint_effort_(i) = cutoff_*joint_effort_(i) + (1.0-cutoff_)*sigm(
         joint_velocity_des_.data(i), 
         friction_coefficients_neg_(i),
         friction_coefficients_pos_(i),
