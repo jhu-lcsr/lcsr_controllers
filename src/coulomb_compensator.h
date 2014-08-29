@@ -26,6 +26,7 @@
 #include <trajectory_msgs/JointTrajectory.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <sensor_msgs/JointState.h>
+#include <geometry_msgs/TwistStamped.h>
 
 #include <visualization_msgs/Marker.h>
 
