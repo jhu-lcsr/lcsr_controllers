@@ -44,6 +44,7 @@ namespace lcsr_controllers {
     // RTT Ports
     RTT::InputPort<Eigen::VectorXd> joint_position_in_;
     RTT::InputPort<KDL::FrameVel> framevel_des_in_;
+    RTT::InputPort<Eigen::VectorXd> wrench_des_in_;
     RTT::OutputPort<Eigen::VectorXd> joint_effort_out_;
     RTT::OutputPort<sensor_msgs::JointState> joint_state_des_out_;
     RTT::OutputPort<geometry_msgs::TwistStamped> twist_des_out_;
@@ -76,6 +77,7 @@ namespace lcsr_controllers {
     // Working variables
     KDL::JntArray joint_position_;
     KDL::FrameVel framevel_des_;
+    Eigen::VectorXd wrench_des_;
     KDL::Twist tip_twist_des_;
     KDL::JntArray joint_velocity_des_;
     Eigen::VectorXd joint_effort_;

@@ -48,6 +48,7 @@ namespace lcsr_controllers {
     RTT::InputPort<Eigen::VectorXd> joint_posture_in_;
     RTT::OutputPort<Eigen::VectorXd> joint_effort_out_;
     RTT::OutputPort<Eigen::VectorXd> joint_velocity_des_out_;
+    RTT::OutputPort<Eigen::VectorXd> wrench_out_;
 
     RTT::InputPort<geometry_msgs::PoseStamped> pose_desired_in_;
     RTT::OutputPort<geometry_msgs::PoseStamped> err_pose_debug_out_;

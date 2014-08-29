@@ -75,6 +75,8 @@ CoulombCompensator::CoulombCompensator(std::string const& name) :
     .doc("Input port: nx1 vector of joint position. (n joints)");
   this->ports()->addPort("framevel_des_in", framevel_des_in_)
     .doc("Input port: Desired frame and twist.");
+  this->ports()->addPort("wrench_des_in", wrench_des_in_)
+    .doc("Input port: Desired wrench (mutually exclusive with framevel_des_in.");
   this->ports()->addPort("joint_effort_out", joint_effort_out_)
     .doc("Output port: nx1 vector of desired joint efforts. (n joints)");
 
@@ -134,6 +136,11 @@ bool CoulombCompensator::configureHook()
   rosparam->getComponentPrivate("friction_coefficients_neg");
   rosparam->getComponentPrivate("friction_coefficients_pos");
 
+  if(friction_coefficients_neg_.size() != n_dof_ || friction_coefficients_pos_.size() != n_dof_) {
+    RTT::log(RTT::Error) << "Wrong number of friction coefficients!" << RTT::endlog();
+    return false;
+  }
+
   // Get joint limits from URDF model
   {
     unsigned int i=0;
@@ -165,6 +172,8 @@ bool CoulombCompensator::configureHook()
   joint_state_des_.velocity.resize(n_dof_);
   joint_state_des_.effort.resize(n_dof_);
 
+  wrench_des_.resize(6);
+
   return true;
 }
 
@@ -172,23 +181,31 @@ bool CoulombCompensator::startHook()
 {
   // Zero out data
   KDL::SetToZero(joint_position_);
-
   return true;
 }
 
 void CoulombCompensator::updateHook()
 {
   // Read in the current joint position & velocities
-  bool new_framevel_des_data = framevel_des_in_.readNewest( framevel_des_ ) == RTT::NewData;
   bool new_pos_data = joint_position_in_.readNewest( joint_position_.data ) == RTT::NewData;
+  bool new_framevel_des_data = framevel_des_in_.readNewest( framevel_des_ ) == RTT::NewData;
+  bool new_wrench_des_data = wrench_des_in_.readNewest( wrench_des_ ) == RTT::NewData;
 
-  if(!new_pos_data || !new_framevel_des_data) {
+  if(!(new_pos_data && (new_framevel_des_data || new_wrench_des_data))) {
     return;
   }
 
-  // Construct twist from framevel
-  tip_twist_des_.vel = framevel_des_.p.v;
-  tip_twist_des_.rot = framevel_des_.M.w;
+  if(new_framevel_des_data) {
+    // Construct twist from framevel
+    tip_twist_des_.vel = framevel_des_.p.v;
+    tip_twist_des_.rot = framevel_des_.M.w;
+  } else if(new_wrench_des_data && wrench_des_.size() == 6) {
+    for(unsigned i=0; i<6; i++) {
+      tip_twist_des_[i] = wrench_des_(i);
+    }
+  } else {
+    return;
+  }
 
   // Get the des joint velocity
   bool ik_ret = kdl_ik_solver_vel_->CartToJnt(

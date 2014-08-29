@@ -133,6 +133,7 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   this->ports()->addPort("framevel_in", pose_twist_in_);
   this->ports()->addPort("joint_effort_out", joint_effort_out_);
   this->ports()->addPort("joint_velocity_des_out", joint_velocity_des_out_);
+  this->ports()->addPort("wrench_out", wrench_out_);
 
   // Add the port and stream it to a ROS topic
   this->ports()->addPort("err_wrench_debug_out", err_wrench_debug_out_);
@@ -564,6 +565,7 @@ void JTNullspaceController::updateHook()
 #endif
 
     joint_velocity_des_out_.write( joint_velocity_des_ );
+    wrench_out_.write( wrench_ );
 
     // Debug visualization
     if(this->debug_throttle_.ready(0.05)) {
