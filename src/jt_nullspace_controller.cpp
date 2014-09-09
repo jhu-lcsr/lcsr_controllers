@@ -161,6 +161,7 @@ bool JTNullspaceController::configureHook()
   rosparam->getComponentPrivate("target_frame");
   rosparam->getComponentPrivate("singularity_avoidance_gain");
   rosparam->getComponentPrivate("joint_center_gain");
+  rosparam->getComponentPrivate("jointspace_damping");
   rosparam->getComponentPrivate("nullspace_damping");
   rosparam->getComponentPrivate("linear_p_gain");
   rosparam->getComponentPrivate("linear_d_gain");
@@ -198,6 +199,11 @@ bool JTNullspaceController::configureHook()
     return false;
   }
 
+  joint_state_msg_.position.resize(n_dof_);
+  joint_state_msg_.velocity.resize(n_dof_);
+  joint_state_msg_.effort.resize(n_dof_);
+
+
   // Get joint limits
   {
     joint_limits_min_.resize(n_dof_);
@@ -210,6 +216,7 @@ bool JTNullspaceController::configureHook()
         it++)
     {
       if(it->getJoint().getType() != KDL::Joint::None) {
+        joint_state_msg_.name.push_back(it->getJoint().getName());
         joint_limits_min_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->lower;
         joint_limits_max_(i) = urdf_model.joints_[it->getJoint().getName()]->limits->upper;
         joint_limits_center_(i) = (joint_limits_min_(i) + joint_limits_max_(i))/2.0;
@@ -244,10 +251,6 @@ bool JTNullspaceController::configureHook()
   joint_inertia_.resize(n_dof_);
   joint_d_gains_.resize(n_dof_);
   joint_velocity_des_.resize(n_dof_);
-
-  joint_state_msg_.position.resize(n_dof_);
-  joint_state_msg_.velocity.resize(n_dof_);
-  joint_state_msg_.effort.resize(n_dof_);
 
   // Prepare ports for realtime processing
   joint_effort_out_.setDataSample(joint_effort_);
