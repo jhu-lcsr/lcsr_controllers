@@ -41,6 +41,7 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   // Params
   ,singularity_avoidance_gain_(0.0)
   ,joint_center_gain_(0.0)
+  ,jointspace_damping_(0.0)
   ,nullspace_damping_(0.0)
   ,nullspace_min_singular_value_(0.00001)
   ,linear_p_gain_(0.0)
@@ -97,6 +98,7 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
   this->addProperty("manipulability",manipulability_);
   this->addProperty("singularity_avoidance_gain",singularity_avoidance_gain_);
   this->addProperty("joint_center_gain",joint_center_gain_);
+  this->addProperty("jointspace_damping",jointspace_damping_);
   this->addProperty("nullspace_damping",nullspace_damping_);
   this->addProperty("nullspace_min_singular_value",nullspace_min_singular_value_);
   this->addProperty("linear_p_gain",linear_p_gain_);
@@ -518,6 +520,10 @@ void JTNullspaceController::updateHook()
       tic = ts->getTicks();
 
       joint_effort_raw_ += N*joint_effort_null_;
+
+      {
+        joint_effort_raw_ -= jointspace_damping_ * (joint_d_gains_.array() * joint_velocity_.array()).matrix();
+      }
     }
 
     // Project the hell out of it

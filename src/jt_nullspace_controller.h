@@ -87,6 +87,7 @@ namespace lcsr_controllers {
       singularity_avoidance_gain_,
       joint_center_gain_,
       nullspace_damping_,
+      jointspace_damping_,
       nullspace_min_singular_value_,
       linear_p_gain_,
       linear_d_gain_,
