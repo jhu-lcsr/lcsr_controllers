@@ -53,7 +53,7 @@ JointPIDController::JointPIDController(std::string const& name) :
   this->addProperty("static_deadband",static_deadband_).doc("Static friction deadband.");
   this->addProperty("static_eps",static_eps_).doc("Static friction velocity deadband.");
   this->addProperty("verbose",verbose_).doc("Verbose output.");
-  
+
   // Configure data ports
   this->ports()->addPort("joint_position_in", joint_position_in_);
   this->ports()->addPort("joint_velocity_in", joint_velocity_in_);
@@ -100,9 +100,9 @@ bool JointPIDController::configureHook()
 
   chain_dynamics_.reset(
       new KDL::ChainDynParam(
-          kdl_chain_, 
+          kdl_chain_,
           KDL::Vector(0.0,0.0,0.0)));
-  
+
   // Get joint names
   joint_state_desired_.name.clear();
   joint_state_desired_.name.reserve(n_dof_);
@@ -196,14 +196,14 @@ void JointPIDController::updateHook()
   last_time = time;
   // Get the current and the time since the last update
   /*
-   *const RTT::Seconds 
-   *  time = conman_hook_->getTime(), 
+   *const RTT::Seconds
+   *  time = conman_hook_->getTime(),
    *  period = conman_hook_->getPeriod();
    */
 
   // Read in the current joint positions & velocities
-  RTT::FlowStatus 
-    pos_status = joint_position_in_.readNewest( joint_position_ ), 
+  RTT::FlowStatus
+    pos_status = joint_position_in_.readNewest( joint_position_ ),
     vel_status = joint_velocity_in_.readNewest( joint_velocity_ );
 
   // If we don't get any position update, we don't write any new data to the ports
@@ -218,8 +218,8 @@ void JointPIDController::updateHook()
 
   // Read in the current commanded joint positions and velocities
   // These commands can be sparse and not return new information each update tick
-  RTT::FlowStatus 
-    pos_cmd_status = joint_position_cmd_in_.readNewest( joint_position_cmd_ ), 
+  RTT::FlowStatus
+    pos_cmd_status = joint_position_cmd_in_.readNewest( joint_position_cmd_ ),
     vel_cmd_status = joint_velocity_cmd_in_.readNewest( joint_velocity_cmd_ ),
     accel_cmd_status = joint_acceleration_cmd_in_.readNewest( joint_acceleration_cmd_ );
 
@@ -237,27 +237,22 @@ void JointPIDController::updateHook()
   }
 
   joint_p_error_ = joint_position_cmd_ - joint_position_;
-  if(1) {
-    joint_d_error_ = joint_velocity_cmd_ - joint_velocity_;
-  } else {
-    joint_d_error_ = (joint_p_error_ - joint_p_error_last_) / period;
-    joint_p_error_last_ = joint_p_error_;
-  }
-  joint_i_error_ = 
+  joint_d_error_ = joint_velocity_cmd_ - joint_velocity_;
+  joint_i_error_ =
     ((joint_i_error_ + period*joint_p_error_).array()
     .max(-i_clamps_.array()))
     .min(i_clamps_.array());
 
   // Determine if any of the joint tolerances have been violated (this means we need to recompute the traj)
   int current_tolerance_violations = 0;
-  for(int i=0; i<n_dof_; i++) 
+  for(int i=0; i<n_dof_; i++)
   {
     if(fabs(joint_p_error_(i)) > position_tolerance_(i)) {
-      if(verbose_) RTT::log(RTT::Warning) << "["<<this->getName() <<"] Joint " << i << " position error tolerance violated ("<<fabs(joint_p_error_[i])<<" > "<<position_tolerance_[i]<<")" << RTT::endlog(); 
+      if(verbose_) RTT::log(RTT::Warning) << "["<<this->getName() <<"] Joint " << i << " position error tolerance violated ("<<fabs(joint_p_error_[i])<<" > "<<position_tolerance_[i]<<")" << RTT::endlog();
       current_tolerance_violations++;
     }
     if(fabs(joint_d_error_(i)) > velocity_tolerance_(i))  {
-      if(verbose_) RTT::log(RTT::Warning) << "["<<this->getName() <<"] Joint " << i << " velocity error tolerance violated ("<<fabs(joint_d_error_[i])<<" > "<<velocity_tolerance_[i]<<")" << RTT::endlog(); 
+      if(verbose_) RTT::log(RTT::Warning) << "["<<this->getName() <<"] Joint " << i << " velocity error tolerance violated ("<<fabs(joint_d_error_[i])<<" > "<<velocity_tolerance_[i]<<")" << RTT::endlog();
       current_tolerance_violations++;
     }
   }
@@ -269,6 +264,12 @@ void JointPIDController::updateHook()
     tolerance_violations_ += current_tolerance_violations;
     joint_effort_.setZero();
   } else {
+    // Check for old tolerance violations
+    if(tolerance_violations_ > 0) {
+      RTT::log(RTT::Warning) << "PID command is now within tolerances." << RTT::endlog();
+      // Reset violations
+      tolerance_violations_ = 0;
+    }
 
     // Compute the command
     if(compensate_friction_) {
@@ -285,36 +286,10 @@ void JointPIDController::updateHook()
           + d_gains_(i)*joint_d_error_(i);
       }
     } else {
-      if(0) {
-
-        // Compute joint-space inertia matrix
-        KDL::JntArray positions;
-        positions.data = joint_position_;
-        if(chain_dynamics_->JntToMass(positions, joint_inertia_) != 0) {
-          RTT::log(RTT::Error) << "Could not compute joint space inertia." << RTT::endlog();
-          this->error();
-          return;
-        }
-        Eigen::MatrixXd H = (joint_inertia_.data); // + (eye + d_gain).inverse() * motor_inertia 
-
-        joint_effort_ = 
-          H * (joint_acceleration_cmd_
-               + (p_gains_.array()*joint_p_error_.array()
-                  + i_gains_.array()*joint_i_error_.array()                  
-                  + d_gains_.array()*joint_d_error_.array()).matrix());
-      } else {
-        joint_effort_ = 
-          (p_gains_.array()*joint_p_error_.array()
-           + i_gains_.array()*joint_i_error_.array()                  
-           + d_gains_.array()*joint_d_error_.array()).matrix();
-      }
-    }
-    
-    // Check for old tolerance violations
-    if(tolerance_violations_ > 0) {
-      RTT::log(RTT::Warning) << "PID command is now within tolerances." << RTT::endlog();
-      // Reset violations
-      tolerance_violations_ = 0;
+      joint_effort_ =
+        (p_gains_.array()*joint_p_error_.array()
+         + i_gains_.array()*joint_i_error_.array()
+         + d_gains_.array()*joint_d_error_.array()).matrix();
     }
   }
 
@@ -322,7 +297,7 @@ void JointPIDController::updateHook()
   joint_effort_out_.write(joint_effort_);
 
   // Publish debug traj to ros
-  if(ros_publish_throttle_.ready(0.02)) 
+  if(ros_publish_throttle_.ready(0.02))
   {
     // Publish controller desired state
     joint_state_desired_.header.stamp = rtt_rosclock::host_now();

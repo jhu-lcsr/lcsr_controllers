@@ -49,6 +49,8 @@ namespace lcsr_controllers {
     unsigned int n_dof_;
     double sampling_resolution_;
     Eigen::VectorXd 
+      goal_position_tolerance_,
+      goal_velocity_tolerance_,
       position_tolerance_,
       velocity_tolerance_,
       max_velocities_,
