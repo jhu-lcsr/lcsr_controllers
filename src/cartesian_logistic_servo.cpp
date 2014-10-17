@@ -301,9 +301,9 @@ void CartesianLogisticServo::updateHook()
     t_cur_cmd.rot = t_cur_cmd.rot * reflected_cur_cmd_angle;
 
     // Check if the twist from the current frame to the unbounded integrated frame has flipped direction
-    if(KDL::dot(t_cur_cmd_last_.rot, t_cur_cmd.rot) < 0) {
+    if(false && KDL::dot(t_cur_cmd_last_.rot, t_cur_cmd.rot) < 0) {
       //t_cur_cmd.rot = -1.0 * t_cur_cmd.rot;
-      RTT::log(RTT::Error) << "FLIP" <<RTT::endlog();
+      RTT::log(RTT::Debug) << "Twist flipped direction" <<RTT::endlog();
     }
     t_cur_cmd_last_ = t_cur_cmd;
     
