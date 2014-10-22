@@ -21,7 +21,7 @@ from urdf_parser_py.urdf import URDF
 
 
 class SingularityRescuer(object):
-    
+
     # States
     NOMINAL=0
     ESCAPE_NEEDED=1
@@ -158,7 +158,7 @@ class SingularityRescuer(object):
             return
 
         rospy.loginfo("SingularityRescuer: joint control active, attempting to escape")
-        
+
         # update state
         self.state=self.ESCAPING
         # send the joint trajectory command
@@ -172,7 +172,7 @@ class SingularityRescuer(object):
         if goal_state != GoalStatus.SUCCEEDED:
             rospy.logerr("SingularityRescuer: failed while trying to escape.")
             self.state = self.ESCAPE_NEEDED
-            return 
+            return
         else:
             # get the current tip and target poses
             tip_pose, target_pose = self.get_tip_and_target(rospy.Time.now())
