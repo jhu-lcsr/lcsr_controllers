@@ -30,6 +30,10 @@ namespace lcsr_controllers {
     std::string tip_link_;
     std::string wrench_link_;
     Eigen::VectorXd gravity_;
+    bool compensate_gravity_;
+    bool compensate_coriolis_;
+    bool compensate_inertial_;
+    bool compensate_end_effector_;
 
     // RTT Ports
     RTT::InputPort<Eigen::VectorXd> joint_position_in_;
@@ -82,7 +86,6 @@ namespace lcsr_controllers {
     std::vector<visualization_msgs::Marker> cogs_msgs_;
 
     rtt_ros_tools::PeriodicThrottle debug_throttle_;
-    bool compensate_end_effector_;
     telemanip_msgs::AttachedInertia end_effector_inertia_;
   };
 }

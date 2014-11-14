@@ -26,6 +26,10 @@ IDControllerKDL::IDControllerKDL(std::string const& name) :
   ,root_link_("")
   ,tip_link_("")
   ,gravity_(3)
+  ,compensate_gravity_(true)
+  ,compensate_coriolis_(true)
+  ,compensate_inertial_(false)
+  ,compensate_end_effector_(true)
   // Working variables
   ,n_dof_(0)
   ,kdl_tree_()
@@ -37,7 +41,6 @@ IDControllerKDL::IDControllerKDL(std::string const& name) :
   ,torques_()
   // Throttles
   ,debug_throttle_(0.05)
-  ,compensate_end_effector_(true)
 {
   // Zero gravity
   gravity_.setZero();
@@ -54,6 +57,12 @@ IDControllerKDL::IDControllerKDL(std::string const& name) :
     .doc("The root link for the controller.");
   this->addProperty("tip_link",tip_link_)
     .doc("The tip link for the controller.");
+  this->addProperty("compensate_gravity",compensate_gravity_)
+    .doc("Will apply a force countering forces due to gravity if true.");
+  this->addProperty("compensate_coriolis",compensate_coriolis_)
+    .doc("Will apply a force countering coriolis forces if true.");
+  this->addProperty("compensate_inertial",compensate_inertial_)
+    .doc("Will apply a force countering inertial forces due to acceleration if true.");
   this->addProperty("compensate_end_effector",compensate_end_effector_)
     .doc("Will compute a wrench on the tip link if true.");
 
@@ -87,6 +96,9 @@ bool IDControllerKDL::configureHook()
   rosparam->getComponentPrivate("root_link");
   rosparam->getComponentPrivate("tip_link");
   rosparam->getComponentPrivate("gravity");
+  rosparam->getComponentPrivate("compensate_gravity");
+  rosparam->getComponentPrivate("compensate_coriolis");
+  rosparam->getComponentPrivate("compensate_inertial");
 
   RTT::log(RTT::Debug) << "Initializing kinematic and dynamic parameters from \"" << root_link_ << "\" to \"" << tip_link_ <<"\"" << RTT::endlog();
 
@@ -128,7 +140,7 @@ bool IDControllerKDL::configureHook()
   id_solver_.reset(
       new KDL::ChainIdSolver_RNE(
         kdl_chain_,
-        KDL::Vector(gravity_[0],gravity_[1],gravity_[2])));
+        (compensate_gravity_ ? 1.0 : 0.0) * KDL::Vector(gravity_[0],gravity_[1],gravity_[2])));
 
   // Create the forward kinematics solver
   fk_solver_.reset( new KDL::ChainFkSolverPos_recursive( kdl_chain_ ) );
@@ -235,6 +247,14 @@ void IDControllerKDL::updateHook()
     } else { 
       // Zero the last wrench
       ext_wrenches_.back() = KDL::Wrench::Zero();
+    }
+
+    // Zero out vectors based on configuration
+    if(!compensate_coriolis_) {
+      KDL::SetToZero(velocities_);
+    }
+    if(!compensate_inertial_) {
+      KDL::SetToZero(accelerations_);
     }
 
     // Compute inverse dynamics
