@@ -34,6 +34,7 @@ ros_generate_rtt_service_proxies(${PROJECT_NAME})
 orocos_use_package(conman)
 
 include_directories(
+  include
   ${catkin_INCLUDE_DIRS}
   ${Eigen_INCLUDE_DIRS}
   ${orocos_kdl_INCLUDE_DIRS})
@@ -43,6 +44,9 @@ link_directories(
 
 add_library(lcsr_controllers_friction
   src/friction/joint_friction_compensator_hss.cpp)
+
+add_library(lcsr_controllers_inertia_utils
+  src/inertia_utils.cpp)
 
 orocos_component(${PROJECT_NAME}
   src/lcsr_controllers.cpp
@@ -59,7 +63,7 @@ set(COMPONENT_LIBS
   ${orocos_kdl_LIBRARIES}
   ${catkin_LIBRARIES})
 
-target_link_libraries( ${PROJECT_NAME} ${COMPONENT_LIBS} lcsr_controllers_friction)
+target_link_libraries( ${PROJECT_NAME} ${COMPONENT_LIBS} lcsr_controllers_friction lcsr_controllers_inertia_utils)
 
 orocos_component(lcsr_controllers_jt_nullspace_controller src/jt_nullspace_controller.cpp)
 orocos_component(lcsr_controllers_cartesian_logistic_servo src/cartesian_logistic_servo.cpp)

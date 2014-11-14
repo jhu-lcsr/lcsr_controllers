@@ -56,6 +56,7 @@
 
   <export>
     <rtt_ros>
+      <plugin_depend>rtt_telemanip_msgs</plugin_depend>
       <plugin_depend>rtt_sensor_msgs</plugin_depend>
       <plugin_depend>rtt_trajectory_msgs</plugin_depend>
       <plugin_depend>rtt_visualization_msgs</plugin_depend>
