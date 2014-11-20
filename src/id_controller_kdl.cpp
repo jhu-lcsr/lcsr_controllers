@@ -14,6 +14,9 @@
 #include <rtt_roscomm/rtt_rostopic.h>
 #include <rtt_rosclock/rtt_rosclock.h>
 #include <kdl_urdf_tools/tools.h>
+
+#include <lcsr_controllers/inertia_utils.h>
+
 #include "id_controller_kdl.h"
 
 using namespace lcsr_controllers;
@@ -39,8 +42,13 @@ IDControllerKDL::IDControllerKDL(std::string const& name) :
   ,positions_()
   ,accelerations_()
   ,torques_()
+  // Inertia
+  ,inertia_map_()
+  ,inertia_mass_rate_(0.0)
+  ,inertia_com_rate_(0.0)
   // Throttles
   ,debug_throttle_(0.05)
+  ,last_update_time_()
 {
   // Zero gravity
   gravity_.setZero();
@@ -65,6 +73,10 @@ IDControllerKDL::IDControllerKDL(std::string const& name) :
     .doc("Will apply a force countering inertial forces due to acceleration if true.");
   this->addProperty("compensate_end_effector",compensate_end_effector_)
     .doc("Will compute a wrench on the tip link if true.");
+  this->addProperty("inertia_mass_rate",inertia_mass_rate_)
+    .doc("The maximum rate in kg/s at which mass can be added and removed from the end-effector.");
+  this->addProperty("inertia_com_rate",inertia_com_rate_)
+    .doc("The maximum rate in m/s at which the center of mass of the attached inertia can be moved.");
 
   // Configure data ports
   this->ports()->addPort("joint_position_in", joint_position_in_);
@@ -99,6 +111,9 @@ bool IDControllerKDL::configureHook()
   rosparam->getComponentPrivate("compensate_gravity");
   rosparam->getComponentPrivate("compensate_coriolis");
   rosparam->getComponentPrivate("compensate_inertial");
+  rosparam->getComponentPrivate("compensate_end_effector");
+  rosparam->getComponentPrivate("inertia_mass_rate");
+  rosparam->getComponentPrivate("inertia_com_rate");
 
   RTT::log(RTT::Debug) << "Initializing kinematic and dynamic parameters from \"" << root_link_ << "\" to \"" << tip_link_ <<"\"" << RTT::endlog();
 
@@ -175,56 +190,87 @@ bool IDControllerKDL::startHook()
   joint_acceleration_.setZero();
   // Zero out torque data
   torques_.data.setZero();
+
+  // Initialize ee inertia
+  ee_inertia_ = KDL::RigidBodyInertia::Zero();
+  total_attached_inertia_ = KDL::RigidBodyInertia::Zero();
+
+  // Initialize last update time
+  last_update_time_ = rtt_rosclock::rtt_now();
   return true;
 }
 
 void IDControllerKDL::updateHook()
 {
+  // Get current time
+  ros::Time now = rtt_rosclock::rtt_now();
+  ros::Duration period = now - last_update_time_;
+  last_update_time_ = now;
+
   // Read in the current joint positions & velocities
   bool new_pos_data = joint_position_in_.readNewest( joint_position_ ) == RTT::NewData;
   bool new_vel_data = joint_velocity_in_.readNewest( joint_velocity_ ) == RTT::NewData;
 
-  // Read all the EE masses
-  bool new_ee_data = false;
-
-  double ee_mass = 0;
-  KDL::Vector ee_cog(0,0,0);
+  KDL::RigidBodyInertia ee_mass;
+  bool new_ee_mass = false;
 
   if(end_effector_masses_in_.readNewest( end_effector_mass_ ) == RTT::NewData) 
   {
     // Make sure the new mass is well-posed
     if(end_effector_mass_.size() == 4 && end_effector_mass_[3] > 1E-4) 
     {
-      // Update EE cog
-      KDL::Vector new_cog(end_effector_mass_[0], end_effector_mass_[1], end_effector_mass_[2]);
-      double new_mass = end_effector_mass_[3];
-      ee_cog = (ee_cog*ee_mass + new_cog*new_mass) / (ee_mass + new_mass);
-      // Update EE mass
-      ee_mass += new_mass;
-      new_ee_data = true;
+      // Update EE inertia
+      ee_mass = KDL::RigidBodyInertia(
+          end_effector_mass_[3],
+          KDL::Vector(end_effector_mass_[0],
+                      end_effector_mass_[1],
+                      end_effector_mass_[2]));
+
+      if(!inertia_map_.set_attached_inertia(ee_mass, "__ee__", 0)) {
+        RTT::log(RTT::Error) << "End-effector inertia is not well-posed." << RTT::endlog();
+      }
+
+      new_ee_mass = true;
     }
   }
 
   while(end_effector_inertias_in_.read( end_effector_inertia_ ) == RTT::NewData) 
   {
-#if 0 // TODO
+    // Update inertia map
     // Make sure the new mass is well-posed
-    if(end_effector_mass_.size() == 4 && end_effector_mass_[3] > 1E-4) 
-    {
-      // Update EE cog
-      KDL::Vector new_cog(end_effector_mass_[0], end_effector_mass_[1], end_effector_mass_[2]);
-      double new_mass = end_effector_mass_[3];
-      ee_cog = (ee_cog*ee_mass + new_cog*new_mass) / (ee_mass + new_mass);
-      // Update EE mass
-      ee_mass += new_mass;
-      new_ee_data = true;
+    if(inertia_map_.update(end_effector_inertia_)) {
+      if(end_effector_inertia_.action == telemanip_msgs::AttachedInertia::UPDATE) {
+        RTT::log(RTT::Debug) <<"Updated EE inertia: "<<end_effector_inertia_.ns<< " #" <<end_effector_inertia_.id<<RTT::endlog();
+      } else {
+        RTT::log(RTT::Debug) <<"Deleted EE inertia: "<<end_effector_inertia_.ns<< " #" <<end_effector_inertia_.id<<RTT::endlog();
+      }
+    } else {
+      if(end_effector_inertia_.action == telemanip_msgs::AttachedInertia::UPDATE) {
+        RTT::log(RTT::Warning) <<"Not updating attached inertia "
+          <<end_effector_inertia_.ns <<" #" <<end_effector_inertia_.id
+          <<" because it is not well-posed: "
+          <<end_effector_inertia_.inertia.m <<RTT::endlog();
+      } else {
+        RTT::log(RTT::Warning) <<"Not removing inertia "
+          <<end_effector_inertia_.ns <<" #" <<end_effector_inertia_.id
+          <<" because it is not currently attached."<<RTT::endlog();
+      }
     }
-#endif 
   }
 
-  // Update the ee inertia
-  if(new_ee_data) {
-    ee_inertia = KDL::RigidBodyInertia( ee_mass, ee_cog );  
+  KDL::RigidBodyInertia inertia_sum = inertia_map_.sum();
+
+  // Interpolate total attached inertia
+  interpolate_inertia(
+      total_attached_inertia_,
+      total_attached_inertia_,
+      inertia_sum,
+      inertia_mass_rate_,
+      inertia_com_rate_,
+      period);
+
+  if(check_inertia(total_attached_inertia_)) {
+    ee_inertia_ = total_attached_inertia_;
   }
 
   if(new_pos_data && new_vel_data) {
@@ -240,10 +286,10 @@ void IDControllerKDL::updateHook()
       // Compute gravity vector in the tip frame
       KDL::Vector tip_gravity = tip_frame.M.Inverse() * KDL::Vector(gravity_[0], gravity_[1], gravity_[2]);
       KDL::Twist tip_gravity_twist(tip_gravity, KDL::Vector::Zero()); //TODO: Add centripetal acceleration (v*r^2)
-      ee_wrench = ee_inertia * tip_gravity_twist;
+      ee_wrench_ = ee_inertia_ * tip_gravity_twist;
       // Compute the external wrench on the tip link
       // Set the wrench (in root_link_ coordinates)
-      ext_wrenches_.back() = ee_wrench;
+      ext_wrenches_.back() = ee_wrench_;
     } else { 
       // Zero the last wrench
       ext_wrenches_.back() = KDL::Wrench::Zero();
@@ -308,3 +354,4 @@ void IDControllerKDL::stopHook()
 void IDControllerKDL::cleanupHook()
 {
 }
+

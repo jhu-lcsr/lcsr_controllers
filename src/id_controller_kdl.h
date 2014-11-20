@@ -19,6 +19,7 @@
 #include <geometry_msgs/WrenchStamped.h>
 #include <visualization_msgs/Marker.h>
 #include <telemanip_msgs/AttachedInertia.h>
+#include <lcsr_controllers/inertia_utils.h>
 
 namespace lcsr_controllers {
   class IDControllerKDL : public RTT::TaskContext
@@ -79,14 +80,21 @@ namespace lcsr_controllers {
       end_effector_mass_,
       joint_effort_;
 
-    KDL::RigidBodyInertia ee_inertia;
-    KDL::Wrench ee_wrench;
+    KDL::RigidBodyInertia ee_inertia_;
+    KDL::Wrench ee_wrench_;
+
+    double inertia_mass_rate_;
+    double inertia_com_rate_;
+    AttachedInertiaMap inertia_map_;
+    KDL::RigidBodyInertia total_attached_inertia_;
 
     geometry_msgs::WrenchStamped wrench_msg_;
     std::vector<visualization_msgs::Marker> cogs_msgs_;
 
     rtt_ros_tools::PeriodicThrottle debug_throttle_;
     telemanip_msgs::AttachedInertia end_effector_inertia_;
+
+    ros::Time last_update_time_;
   };
 }
 
