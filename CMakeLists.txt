@@ -16,6 +16,8 @@ find_package(catkin REQUIRED
   reflexxes_type2
   telemanip_msgs)
 
+
+find_package(cmake_modules REQUIRED)
 find_package(orocos_kdl REQUIRED)
 find_package(Eigen REQUIRED)
 
