@@ -14,7 +14,8 @@ find_package(catkin REQUIRED
   control_msgs
   control_toolbox
   reflexxes_type2
-  telemanip_msgs)
+  telemanip_msgs
+  cmake_modules)
 
 find_package(orocos_kdl REQUIRED)
 find_package(Eigen REQUIRED)
