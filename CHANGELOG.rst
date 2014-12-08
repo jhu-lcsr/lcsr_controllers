@@ -1,5 +1,7 @@
 Forthcoming
 -----------
+* 0.2.0
+* updating changelog
 * Merge branch 'master' into devel
 * Merge pull request `#4 <https://github.com/jhu-lcsr/lcsr_controllers/issues/4>`_ from nasnysom/cmake_eigen
   attempting indigo build.
