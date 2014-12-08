@@ -1,5 +1,5 @@
-Forthcoming
------------
+0.7.0 (2014-12-08)
+------------------
 * 0.2.0
 * updating changelog
 * Merge branch 'master' into devel
