@@ -42,6 +42,7 @@ JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
   ,stop_on_violation_(true)
   ,traj_mode_(INACTIVE)
   ,stop_time_(0.5)
+  ,temporal_tolerance_(0.0)
   // RML
   ,rml_zero_(0)
   ,rml_true_(0)
@@ -64,6 +65,7 @@ JointTrajGeneratorRML::JointTrajGeneratorRML(std::string const& name) :
   this->addProperty("sampling_resolution",sampling_resolution_).doc("Sampling resolution in seconds.");
   this->addProperty("stop_on_violation",stop_on_violation_).doc("Stop the trajectory if the tolerances are violated.");
   this->addProperty("stop_time",stop_time_).doc("The time it should take to stop the arm.");
+  this->addProperty("temporal_tolerance",temporal_tolerance_).doc("The amount of time (in seconds) that trajectory goal times are allowed to be violated.");
   this->addProperty("verbose",verbose_).doc("Verbose debug output control.");
 
   // Configure data ports
@@ -198,6 +200,7 @@ bool JointTrajGeneratorRML::configureHook()
     rosparam->getComponentPrivate("verbose");
     rosparam->getComponentPrivate("stop_on_violation");
     rosparam->getComponentPrivate("stop_time");
+    rosparam->getComponentPrivate("temporal_tolerance");
   }
 
   // Resize IO vectors
@@ -514,19 +517,28 @@ bool JointTrajGeneratorRML::updateSegments(
   bool remove_old_segments = false;
   TrajSegments::iterator erase_it = segments.begin();
 
+  ros::Time tolerant_now = rtt_now - ros::Duration(temporal_tolerance_);
+
   for(TrajSegments::iterator it = segments.begin(); it != segments.end(); ++it)
   {
     // Peek at the next segment
     TrajSegments::iterator next = it;  ++next;
 
+    // Has already been achieved
+    const bool already_achieved = it->achieved;
+    // Goal is no longer active
+    const bool no_longer_active =
+      it->gh !=NULL && (!it->gh->isValid() || it->gh->getGoalStatus().status != actionlib_msgs::GoalStatus::ACTIVE);
+    // Should have finished earlier than now
+    const bool should_have_finished = 
+      !it->flexible && it->expected_time < tolerant_now;
+    // Next segment should have started
+    const bool next_needs_to_start =
+      next != segments.end() && !next->flexible && next->start_time < tolerant_now;
+
     // Mark this segment for removal if it's expired or if we need to start processing the next one
     // This only applies to non-flexible segments
-    if(
-        (it->achieved) ||                                  // Has already been achieved
-        (it->gh !=NULL && (!it->gh->isValid() || it->gh->getGoalStatus().status != actionlib_msgs::GoalStatus::ACTIVE)) ||
-        //(it->achieved && next->flexible) ||
-        (!it->flexible && it->expected_time < rtt_now) ||  // Should have finished earlier than now
-        (next != segments.end() && !next->flexible && next->start_time <= rtt_now)) // Next segment should have started
+    if(already_achieved || no_longer_active || should_have_finished || next_needs_to_start)
     {
       // Mark trivial segments as achieved
       if(!it->achieved) {
@@ -554,13 +566,28 @@ bool JointTrajGeneratorRML::updateSegments(
       remove_old_segments = true;
 
       if(verbose_) {
-        RTT::log(RTT::Debug) << "Segment ("<<it->id<<") needs to be removed." <<RTT::endlog();
-        RTT::log(RTT::Debug) << " - goal status: "<< ((it->gh == NULL) ? (-1) : int(it->gh->getGoalStatus().status)) << RTT::endlog();
+        RTT::log(RTT::Debug) << "Segment ("<<it->id<<") needs to be removed because:" <<RTT::endlog();
+        RTT::log(RTT::Debug) << " - already_achieved: "<<already_achieved<<RTT::endlog();
+        RTT::log(RTT::Debug) << " - no_longer_active: "<<no_longer_active<<RTT::endlog();
+        RTT::log(RTT::Debug) << " - should_have_finished: "<<should_have_finished<<RTT::endlog();
+        RTT::log(RTT::Debug) << " - next_needs_to_start: "<<next_needs_to_start<<RTT::endlog();
+        RTT::log(RTT::Debug) << " - now: "<<rtt_now  <<  RTT::endlog();
+        RTT::log(RTT::Debug) << " - tolerant_now: "<<tolerant_now  <<  RTT::endlog();
+        RTT::log(RTT::Debug) << "Segment ("<<it->id<<") details:" <<RTT::endlog();
+        RTT::log(RTT::Debug) << " - goal status: "<< ((it->gh == NULL || !it->gh->isValid()) ? (-1) : int(it->gh->getGoalStatus().status)) << RTT::endlog();
         RTT::log(RTT::Debug) << " - achieved: "<<it->achieved  << RTT::endlog();
         RTT::log(RTT::Debug) << " - flexible: "<<it->flexible  <<  RTT::endlog();
         RTT::log(RTT::Debug) << " - start_time: "<<it->start_time  <<  RTT::endlog();
         RTT::log(RTT::Debug) << " - goal_time: "<<it->goal_time  <<  RTT::endlog();
         RTT::log(RTT::Debug) << " - expected_time: "<<it->expected_time  <<  RTT::endlog();
+        if(next != segments.end()) {
+          RTT::log(RTT::Debug) << "Segment ("<<next->id<<") details:" << RTT::endlog();
+          RTT::log(RTT::Debug) << " - achieved: "<<next->achieved  << RTT::endlog();
+          RTT::log(RTT::Debug) << " - flexible: "<<next->flexible  <<  RTT::endlog();
+          RTT::log(RTT::Debug) << " - start_time: "<<next->start_time  <<  RTT::endlog();
+          RTT::log(RTT::Debug) << " - goal_time: "<<next->goal_time  <<  RTT::endlog();
+          RTT::log(RTT::Debug) << " - expected_time: "<<next->expected_time  <<  RTT::endlog();
+        }
       }
     }
   }
@@ -1124,6 +1151,7 @@ void JointTrajGeneratorRML::updateHook()
                 recompute_trajectory = false;
               } else {
                 // Remove the segment
+                if(verbose_) RTT::log(RTT::Debug) << "Removing active segment ("<<segments_.begin()->id<<") because it is not feasible."<<RTT::endlog();
                 segments_.pop_front();
               }
             }
@@ -1158,6 +1186,8 @@ void JointTrajGeneratorRML::updateHook()
 
           // Pop the segment if it's complete
           if(!segments_.empty() && segment_complete) {
+            if(verbose_) RTT::log(RTT::Debug) << "Removing active segment ("<<segments_.begin()->id<<") because it is complete."<<RTT::endlog();
+            segments_.begin()->achieved = true;
             segments_.pop_front();
           }
 
