@@ -1,3 +1,8 @@
+Forthcoming
+-----------
+* rml: adding additional debug info and fixing issue with actionlib interface prematurely aborting and adding temporal tolerance
+* Contributors: Jonathan Bohren
+
 0.7.0 (2014-12-08)
 ------------------
 * moved cmake_modules dependency to catkin components list
