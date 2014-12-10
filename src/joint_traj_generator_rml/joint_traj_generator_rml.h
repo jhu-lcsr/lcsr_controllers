@@ -59,6 +59,7 @@ namespace lcsr_controllers {
     bool verbose_;
     bool stop_on_violation_;
     double stop_time_;
+    double temporal_tolerance_;
 
     typedef enum {
       INACTIVE = 0,
