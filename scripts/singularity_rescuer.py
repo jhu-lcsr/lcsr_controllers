@@ -127,7 +127,7 @@ class SingularityRescuer(object):
             self.state = self.NOMINAL
             return
 
-        rospy.loginfo("SingularityRescuer: escape plannned in %d seconds" % result.planning_time)
+        rospy.loginfo("SingularityRescuer: escape planned in %f seconds" % result.planning_time)
 
         # construct a joint trajectory goal
         self.joint_trajectory_goal = control_msgs.FollowJointTrajectoryGoal(
