@@ -16,6 +16,7 @@ import shape_msgs.msg as shape_msgs
 import tf
 
 from tf_conversions.posemath import fromTf, toMsg
+import lcsr_controllers.srv
 
 from urdf_parser_py.urdf import URDF
 
@@ -82,7 +83,15 @@ class SingularityRescuer(object):
         self.get_blocks.wait_for_server()
         self.set_blocks.wait_for_server()
 
+        # service to enable/disable singularity rescuing
+        self.enabled = False
+        self.toggle_service = rospy.Service("~toggle", lcsr_controllers.srv.Toggle, self.toggle)
+
         rospy.loginfo("Action clients created.")
+
+    def toggle(self, req):
+        self.enabled = req.enable
+        return lcsr_controllers.srv.ToggleResponse(self.enabled)
 
     def joint_state_cb(self, joint_state):
         # compute joint limit proximity
@@ -96,14 +105,15 @@ class SingularityRescuer(object):
         if not tip_pose or not target_pose:
             return
 
+        if not self.enabled:
+            return
+
         # check if we're in the nominal state
         if self.state == self.NOMINAL:
-
             # check if planning is needed
-            planning_needed = not self.within_tolerance(tip_pose, target_pose)
+            planning_needed = not self.within_tolerance(tip_pose, target_pose) and self.stuck()
         elif self.state == self.ESCAPE_NEEDED:
             planning_needed = True
-
         elif self.state == self.PLANNING_ESCAPE:
             # if the cartesian error is small enough, preempt the motion plan request
             pass
@@ -119,6 +129,15 @@ class SingularityRescuer(object):
             self.move_group.send_goal(
                     self.move_group_goal,
                     done_cb=self.planning_escape_done)
+
+    def stuck(self):
+        # TODO: determine if the arm is near-singular
+        # needs:
+        #   urdf model
+        #   kdl chain
+        #   compute kdl jacobian
+        #   get singular values from numpy
+        return True
 
     def planning_escape_done(self, goal_state, result):
         # check if the goal succeeded
@@ -237,7 +256,7 @@ class SingularityRescuer(object):
         linear_err = twist_err.vel.Norm()
         angular_err = twist_err.rot.Norm()
 
-        #print("linear: %g, angular %g" % (linear_err, angular_err))
+        rospy.logdebug("err: linear: %g angular: %g" % (linear_err, angular_err))
 
         # decide if planning is needed
         return linear_err < scale*self.linear_err_threshold and angular_err < scale*self.angular_err_threshold

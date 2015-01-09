@@ -24,7 +24,8 @@ find_package(Eigen REQUIRED)
 add_message_files(FILES
   SemiAbsoluteCalibrationState.msg)
 add_service_files(FILES
-  Calibrate.srv)
+  Calibrate.srv
+  Toggle.srv)
 generate_messages(DEPENDENCIES std_msgs geometry_msgs)
 catkin_package()
 
