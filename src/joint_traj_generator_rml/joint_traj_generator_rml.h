@@ -64,7 +64,9 @@ namespace lcsr_controllers {
     typedef enum {
       INACTIVE = 0,
       FOLLOWING = 1,
-      RECOVERING = 2
+      RECOVERING = 2,
+      ABORTING = 3,
+      STOPPING = 4
     } Mode;
 
     Mode traj_mode_;

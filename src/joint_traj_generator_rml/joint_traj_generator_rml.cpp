@@ -921,6 +921,9 @@ bool JointTrajGeneratorRML::startHook()
   joint_velocity_last_.setZero();
   joint_acceleration_.setZero();
 
+  joint_position_sample_.setZero();
+  joint_velocity_sample_.setZero();
+
   joint_position_in_.clear();
   joint_velocity_in_.clear();
   joint_position_cmd_in_.clear();
@@ -957,6 +960,7 @@ void JointTrajGeneratorRML::updateHook()
     return;
   }
 
+  // TODO: parameterize exponential filter
   //joint_velocity_ = 0.98*joint_velocity_last_ + 0.02*joint_velocity_;
   joint_acceleration_ = 0.1*joint_acceleration_ + 0.9*(joint_velocity_ - joint_velocity_last_);
   joint_velocity_last_ = joint_velocity_;
@@ -981,26 +985,8 @@ void JointTrajGeneratorRML::updateHook()
     // Sample the trajectory as it stands if the tolerances have not been violated
     if(tolerances_violated)
     {
-      if(stop_on_violation_) {
-        RTT::log(RTT::Warning) << "JointTrajGeneratorRML: Tolerances violated, stopping execution and dropping trajectory." << RTT::endlog();
-        traj_mode_ = INACTIVE;
-      } else {
-        RTT::log(RTT::Warning) << "JointTrajGeneratorRML: Tolerances violated, attemping to recover..." << RTT::endlog();
-        // Create traj segment with goal @ current position @ zero velocity
-        TrajSegment recovery_segment(n_dof_, true);
-        recovery_segment.goal_positions = joint_position_;
-
-        // Deactivate the active traj segment
-        if(!segments_.empty() && segments_.begin()->active) {
-          segments_.begin()->active;
-        }
-
-        // Insert the recovery segment
-        segments_.push_front(recovery_segment);
-
-        // Switch to recovering mode
-        traj_mode_ = RECOVERING;
-      }
+      traj_mode_ = ABORTING;
+      RTT::log(RTT::Warning) << "JointTrajGeneratorRML: Tolerances violated, aborting trajectory." << RTT::endlog();
     }
     else
     {
@@ -1086,12 +1072,17 @@ void JointTrajGeneratorRML::updateHook()
         this->computeTrajectory(
             rtt_now,
             joint_position_,
-            joint_velocity_,
+            joint_zero_,
             joint_zero_,
             ros::Duration(stop_time_),
-            joint_position_ + joint_velocity_*stop_time_,
+            joint_position_,
             joint_zero_,
             rml_, rml_in_, rml_out_, rml_flags_);
+
+        // NOTE: we need to increase tolerances when in recovery
+        // mode, the key goal is to go to zero velocity, not to
+        // follow a given trajectory. This should be made clear in
+        // the algorithm
 
         last_segment_start_time_ = rtt_now;
 
@@ -1106,6 +1097,65 @@ void JointTrajGeneratorRML::updateHook()
 
         // Switch to following mode
         traj_mode_ = FOLLOWING;
+
+        break;
+      }
+
+    case ABORTING:
+      // Seed the trajectory generator with the current position of the arm
+      // NOTE: This ignores all inputs until in the "following" mode
+      {
+        // Clear trajectory
+        segments_.clear();
+
+        // Run RML once with the current joint state as both the initial state and goal
+        this->computeTrajectory(
+            rtt_now,
+            joint_position_,
+            joint_velocity_sample_,
+            joint_zero_,
+            ros::Duration(stop_time_),
+            joint_position_ + joint_velocity_sample_*stop_time_,
+            joint_zero_,
+            rml_, rml_in_, rml_out_, rml_flags_);
+
+        // NOTE: we need to increase tolerances when in recovery
+        // mode, the key goal is to go to zero velocity, not to
+        // follow a given trajectory. This should be made clear in
+        // the algorithm
+
+        last_segment_start_time_ = rtt_now;
+
+        // Sample the trajectory
+        this->sampleTrajectory(
+            rtt_now,
+            last_segment_start_time_,
+            rml_, rml_out_,
+            joint_position_sample_,
+            joint_velocity_sample_,
+            joint_acceleration_sample_);
+
+        // Stop or attempt to recover
+        if(stop_on_violation_) {
+          RTT::log(RTT::Warning) << "JointTrajGeneratorRML: Aborting trajectory, stopping execution and dropping trajectory." << RTT::endlog();
+          traj_mode_ = STOPPING;
+        } else {
+          RTT::log(RTT::Warning) << "JointTrajGeneratorRML: Aborting trajectory, attemping to recover..." << RTT::endlog();
+          // Create traj segment with goal @ current position @ zero velocity
+          TrajSegment recovery_segment(n_dof_, true);
+          recovery_segment.goal_positions = joint_position_;
+
+          // Deactivate the active traj segment
+          if(!segments_.empty() && segments_.begin()->active) {
+            segments_.begin()->active;
+          }
+
+          // Insert the recovery segment
+          segments_.push_front(recovery_segment);
+
+          // Switch to recovering mode
+          traj_mode_ = RECOVERING;
+        }
 
         break;
       }
@@ -1219,7 +1269,33 @@ void JointTrajGeneratorRML::updateHook()
             segments_.pop_front();
           }
 
+          // Go back to following
           traj_mode_ = FOLLOWING;
+        }
+
+        break;
+      }
+
+    case STOPPING:
+      // Sample the active trajectory without tolerance checking, and when done, go to inactive state
+      // NOTE: This ignores all inputs until in the "inactive" mode
+      {
+        bool segment_complete = this->sampleTrajectory(
+            rtt_now,
+            last_segment_start_time_,
+            rml_, rml_out_,
+            joint_position_sample_,
+            joint_velocity_sample_,
+            joint_acceleration_sample_);
+
+        // Pop the segment if it's complete
+        if(segment_complete) {
+          if(!segments_.empty()) {
+            segments_.pop_front();
+          }
+
+          // Go inactive
+          traj_mode_ = INACTIVE;
         }
 
         break;
