@@ -47,6 +47,9 @@ namespace lcsr_controllers {
     RTT::InputPort<Eigen::VectorXd> positions_in_port_;
     RTT::OutputPort<KDL::FrameVel> framevel_out_port_;
 
+    RTT::InputPort<Eigen::VectorXd> effort_in_port_;
+    RTT::InputPort<Eigen::VectorXd> effort_cmd_in_port_;
+
     // RTT Debug Ports
     RTT::OperationCaller<geometry_msgs::TransformStamped(const std::string&,
       const std::string&)> tf_lookup_transform_;
@@ -68,8 +71,12 @@ namespace lcsr_controllers {
     KDL::Chain kdl_chain_;
     KDL::Tree kdl_tree_;
 
+    // Dynamic properties
+    double max_effort_norm_error_;
+
     // Working variables
     KDL::JntArrayVel positions_;
+    Eigen::VectorXd effort_, effort_cmd_;
 
     // Joint limits
     KDL::JntArray joint_limits_min_;

@@ -55,10 +55,16 @@ CartesianLogisticServo::CartesianLogisticServo(std::string const& name) :
   this->addProperty("max_angular_error",max_angular_error_);
   this->addProperty("linear_p_gain",linear_p_gain_);
   this->addProperty("angular_p_gain",angular_p_gain_);
+  this->addProperty("max_effort_norm_error",max_effort_norm_error_);
 
   // Configure data ports
   this->ports()->addPort("positions_in", positions_in_port_)
     .doc("Input port: nx1 vector of joint positions. (n joints)");
+
+  this->ports()->addPort("effort_in", effort_in_port_)
+    .doc("Input port: nx1 vector of joint efforts. (n joints)");
+  this->ports()->addPort("effort_cmd_in", effort_cmd_in_port_)
+    .doc("Input port: nx1 vector of commanded joint efforts. (n joints)");
 
   this->ports()->addPort("framevel_out", framevel_out_port_)
     .doc("Output port: KDL::FrameVel of frame that moves subject to rate limits");
@@ -78,6 +84,7 @@ bool CartesianLogisticServo::configureHook()
   rosparam->getComponentPrivate("max_angular_error");
   rosparam->getComponentPrivate("linear_p_gain");
   rosparam->getComponentPrivate("angular_p_gain");
+  rosparam->getComponentPrivate("max_effort_norm_error");
 
   rosparam->getComponentPrivate("robot_description_param");
   rosparam->getParam(robot_description_param_, "robot_description");
@@ -126,6 +133,8 @@ bool CartesianLogisticServo::configureHook()
       new KDL::ChainJntToJacSolver(kdl_chain_));
 
   // Resize working variables
+  effort_.resize(n_dof_);
+  effort_cmd_.resize(n_dof_);
   positions_.resize(n_dof_);
   joint_limits_min_.resize(n_dof_);
   joint_limits_max_.resize(n_dof_);
@@ -181,7 +190,6 @@ bool CartesianLogisticServo::startHook()
 
   // Compute the current tip frame
   fk_solver_vel_->JntToCart(positions_, tip_framevel_cur_);
-
 
   tip_frame_cmd_ = tip_framevel_cur_.GetFrame();
   tip_frame_cmd_unbounded_ = tip_framevel_cur_.GetFrame();
@@ -257,6 +265,18 @@ void CartesianLogisticServo::updateHook()
 
   // Compute the current tip pose in the base frame
   fk_solver_vel_->JntToCart(positions_, tip_framevel_cur_);
+
+  // Check effort cmd vs actual
+  RTT::FlowStatus effort_data = effort_in_port_.readNewest( effort_ );
+  RTT::FlowStatus effort_cmd_data = effort_cmd_in_port_.readNewest( effort_cmd_ );
+  if(effort_data != RTT::NewData || effort_cmd_data != RTT::NewData) {
+    return;
+  }
+
+  // Reset the goal cartesian frame to the current position
+  if((effort_ - effort_cmd_).norm() > max_effort_norm_error_) {
+    tip_frame_cmd_unbounded_ = tip_framevel_cur_.GetFrame();
+  }
 
   // Get thep current desired pose in the base frame
   try{
