@@ -914,24 +914,31 @@ bool JointTrajGeneratorRML::insertSegments(
 
 bool JointTrajGeneratorRML::startHook()
 {
+  // Clear any segments that may be left over from previous executions
   segments_.clear();
 
+  // Zero all state vectors
   joint_position_.setZero();
   joint_velocity_.setZero();
   joint_velocity_last_.setZero();
   joint_acceleration_.setZero();
 
+  // Zero trajectory sample vectors
   joint_position_sample_.setZero();
   joint_velocity_sample_.setZero();
 
+  // Clear input data ports
   joint_position_in_.clear();
   joint_velocity_in_.clear();
   joint_position_cmd_in_.clear();
   joint_traj_point_cmd_in_.clear();
   joint_traj_cmd_in_.clear();
 
-  // Enable all joints
+  // Enable all joints in trajectory generator
   rml_in_->SetSelectionVector(rml_true_);
+
+  // Always start in INACTIVE mode until receiving a command
+  traj_mode_ = INACTIVE;
 
   return true;
 }
