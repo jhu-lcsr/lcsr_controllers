@@ -84,7 +84,7 @@ class SingularityRescuer(object):
         self.set_blocks.wait_for_server()
 
         # service to enable/disable singularity rescuing
-        self.enabled = False
+        self.enabled = True
         self.toggle_service = rospy.Service("~toggle", lcsr_controllers.srv.Toggle, self.toggle)
 
         rospy.loginfo("Action clients created.")
@@ -196,13 +196,16 @@ class SingularityRescuer(object):
             # get the current tip and target poses
             tip_pose, target_pose = self.get_tip_and_target(rospy.Time.now())
 
-            # check if we successfully escaped the singularity
-            if self.within_tolerance(tip_pose, target_pose, 0.1):
-                rospy.loginfo("SingularityRescuer: Completed escape.")
+            if tip_pose and target_pose:
+                # check if we successfully escaped the singularity
+                if self.within_tolerance(tip_pose, target_pose, 0.1):
+                    rospy.loginfo("SingularityRescuer: Completed escape.")
+                else:
+                    rospy.logwarn("SingularityRescuer: Could not escape.")
+                    self.state = self.ESCAPE_NEEDED
+                    return
             else:
-                rospy.logwarn("SingularityRescuer: Could not  escape.")
-                self.state = self.ESCAPE_NEEDED
-                return
+                rospy.logerr("SingularityRescuer: Could not get tip or target pose, returning to cartesian control.")
 
         # switch out of joint mode and back into cartesian mode
         self.state=self.SWITCHING_TO_CART_CONTROL
