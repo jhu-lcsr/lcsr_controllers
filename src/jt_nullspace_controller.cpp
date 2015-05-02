@@ -453,7 +453,7 @@ void JTNullspaceController::updateHook()
       };
       
       if(s_min < 0.001) {
-        //RTT::log(RTT::Warning) << "Minimum singular value in projector is: "<<s_min<<RTT::endlog();
+        RTT::log(RTT::Warning) << "Minimum singular value in projector is: "<<s_min<<RTT::endlog();
       }
 
       dur_compute_nullspace_ = ts->secondsSince(tic);
