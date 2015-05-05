@@ -7,7 +7,7 @@
 #include <map>
 
 #include <Eigen/Dense>
-#include <Eigen/SVD> 
+#include <Eigen/SVD>
 
 #include <kdl/tree.hpp>
 
@@ -81,7 +81,7 @@ JTNullspaceController::JTNullspaceController(std::string const& name) :
     .doc("The tip link for the controller. Cartesian pose commands are applied to this frame.");
   this->addProperty("target_frame",target_frame_)
     .doc("The name of the target TF frame if tf is to be used. Leave blank to disable this.");
-  
+
   this->addOperation("printH",&JTNullspaceController::printH,this);
 
   this->addProperty("dur_get_data_",dur_get_data_);
@@ -183,7 +183,7 @@ bool JTNullspaceController::configureHook()
   }
 
   if(!tf_.ready()) {
-    RTT::log(RTT::Error) << this->getName() << " controller is not connected to tf!" << RTT::endlog(); 
+    RTT::log(RTT::Error) << this->getName() << " controller is not connected to tf!" << RTT::endlog();
     return false;
   }
 
@@ -233,7 +233,7 @@ bool JTNullspaceController::configureHook()
       new KDL::ChainJntToJacSolver(kdl_chain_));
   chain_dynamics_.reset(
       new KDL::ChainDynParam(
-          kdl_chain_, 
+          kdl_chain_,
           KDL::Vector(0.0,0.0,0.0)));
 
   // Resize IO vectors
@@ -290,7 +290,7 @@ void JTNullspaceController::updateHook()
     RTT::FlowStatus ros_status = pose_desired_in_.readNewest(pose_msg_);
     RTT::FlowStatus rtt_status = pose_twist_in_.readNewest(framevel_desired_);
 
-    if(ros_status == RTT::NewData) 
+    if(ros_status == RTT::NewData)
     {
       KDL::Frame frame;
       tf::poseMsgToKDL(pose_msg_.pose, frame);
@@ -298,8 +298,8 @@ void JTNullspaceController::updateHook()
       framevel_desired_.M.w = KDL::Vector::Zero();
       framevel_desired_.p.p = frame.p;
       framevel_desired_.p.v = KDL::Vector::Zero();
-    } 
-    else if(target_frame_.length() > 0) 
+    }
+    else if(target_frame_.length() > 0)
     {
       if(tf_.canTransform(root_link_,target_frame_)) {
         geometry_msgs::TransformStamped tform_msg = tf_.lookupTransform(root_link_, target_frame_);
@@ -314,7 +314,7 @@ void JTNullspaceController::updateHook()
         return;
       }
     }
-    else if(rtt_status == RTT::NoData && ros_status == RTT::NoData) 
+    else if(rtt_status == RTT::NoData && ros_status == RTT::NoData)
     {
       return;
     }
@@ -371,7 +371,7 @@ void JTNullspaceController::updateHook()
       this->error();
       return;
     }
-    
+
     Matrix6Jd J = jacobian_.data;
     MatrixJ6d J_t = J.transpose();
 
@@ -389,7 +389,7 @@ void JTNullspaceController::updateHook()
 
     // Compute nullspace effort (to be projected)
     // This is based on:
-    // Springer Tracts in Advanced Robotics: Volume 49 
+    // Springer Tracts in Advanced Robotics: Volume 49
     // Cartesian Impedance Control of Redundant and Flexible-Joint Robots
     // by Christian Ott (ISBN 978-3-540-69253-9)
     {
@@ -414,9 +414,10 @@ void JTNullspaceController::updateHook()
       dur_compute_joint_inertia_ = ts->secondsSince(tic);
       tic = ts->getTicks();
 
-      // Compute projector
       // Smallest singular value
       double s_min;
+
+      // Compute projector
       switch(projector_type_) {
         case 1: { // Unweighted projector
                   P1 = Z.transpose()*(Z*Z.transpose()).inverse()*Z;
@@ -427,12 +428,12 @@ void JTNullspaceController::updateHook()
                   N = P2;
                   break; }
         case 3: { // Dynamically consistent projector
-                  Eigen::MatrixXd &M = (joint_inertia_.data); // + (eye + d_gain).inverse() * motor_inertia 
+                  Eigen::MatrixXd &M = (joint_inertia_.data); // + (eye + d_gain).inverse() * motor_inertia
                   P3 = M*Z.transpose()*(Z*M*Z.transpose()).inverse()*Z;
                   N = P3;
                   break; }
         case 4: { // Operational space dynamically consistent projector
-                  Eigen::MatrixXd &M = (joint_inertia_.data); // + (eye + d_gain).inverse() * motor_inertia 
+                  Eigen::MatrixXd &M = (joint_inertia_.data); // + (eye + d_gain).inverse() * motor_inertia
                   Eigen::MatrixXd M_inv = M.inverse();
                   MatrixJJd eye = MatrixJJd::Identity(n_dof_,n_dof_);
                   Matrix6d JMinvJt = J*M_inv*J_t;
@@ -451,7 +452,7 @@ void JTNullspaceController::updateHook()
                   N = P4;
                   break; }
       };
-      
+
       if(s_min < 0.001) {
         //RTT::log(RTT::Warning) << "Minimum singular value in projector is: "<<s_min<<RTT::endlog();
       }
@@ -459,7 +460,7 @@ void JTNullspaceController::updateHook()
       dur_compute_nullspace_ = ts->secondsSince(tic);
       tic = ts->getTicks();
 
-      // Nullspace damping term 
+      // Nullspace damping term
       {
         joint_effort_null_ -= nullspace_damping_ * (joint_d_gains_.array() * joint_velocity_.array()).matrix();
       }
@@ -508,7 +509,7 @@ void JTNullspaceController::updateHook()
 
           for(unsigned i=0; i<6; i++) {
             for(unsigned j=0; j<6; j++) {
-              joint_effort_null_(l) += 
+              joint_effort_null_(l) +=
                 0.5*
                 singularity_avoidance_gain_*
                 manipulability_*
