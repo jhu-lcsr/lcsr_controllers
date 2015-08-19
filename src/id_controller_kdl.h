@@ -85,6 +85,7 @@ namespace lcsr_controllers {
 
     double inertia_mass_rate_;
     double inertia_com_rate_;
+    double max_attached_mass_;
     AttachedInertiaMap inertia_map_;
     KDL::RigidBodyInertia total_attached_inertia_;
 

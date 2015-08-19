@@ -135,7 +135,12 @@ namespace lcsr_controllers {
               gh->setSucceeded();
             }
           } else {
-            RTT::log(RTT::Debug) << "Trajectory segment ("<<id<<") removed without being achieved. Aborting goal." << RTT::endlog();
+            RTT::log(RTT::Warning) << "Trajectory segment ("<<id<<") removed without being achieved. Aborting goal." << RTT::endlog();
+            RTT::log(RTT::Warning) << "Trajectory segment ("<<id<<"): ";
+            for(size_t i=0; i< goal_positions.size(); i++) {
+              RTT::log(RTT::Warning) << goal_positions[i] << ", ";
+            }
+            RTT::log(RTT::Warning) << "@ "<< goal_time << RTT::endlog();
             gh->setAborted();
           }
         }
@@ -402,6 +407,9 @@ namespace lcsr_controllers {
     Feedback feedback_;
     //! Action result message
     Result result_;
+
+    //! Actionlib mutex for current_gh_
+    RTT::os::Mutex gh_mutex_;
 
     //! RTT action server
     rtt_actionlib::RTTActionServer<control_msgs::FollowJointTrajectoryAction> rtt_action_server_;

@@ -546,17 +546,21 @@ bool JointTrajGeneratorRML::updateSegments(
         bool within_tolerance = true;
         for(int i=0; i<n_dof_; i++)
         {
-          if(std::abs(it->goal_positions(i) - joint_position[i]) > goal_position_tolerance_[i]) {
+          double pos_err = std::abs(it->goal_positions(i) - joint_position[i]);
+          if(pos_err > goal_position_tolerance_[i]) {
             within_tolerance = false;
+            if(verbose_) RTT::log(RTT::Debug) << "Joint "<<i<<" is violating the goal position tolerance: "<< pos_err << RTT::endlog();
           }
-          if(std::abs(it->goal_velocities(i) - joint_velocity[i]) > goal_velocity_tolerance_[i])  {
+          double vel_err = std::abs(it->goal_velocities(i) - joint_velocity[i]);
+          if(vel_err > goal_velocity_tolerance_[i])  {
             within_tolerance = false;
+            if(verbose_) RTT::log(RTT::Debug) << "Joint "<<i<<" is violating the goal velocity tolerance: "<< vel_err << RTT::endlog();
           }
         }
 
         // Achieve it if it's within tolerance
         if(within_tolerance) {
-          RTT::log(RTT::Debug) << "Dropping new segment because it is within the goal tolerances." << RTT::endlog();
+          RTT::log(RTT::Debug) << "Dropping segment because it is within the goal tolerances." << RTT::endlog();
           it->achieved = true;
         }
       }
@@ -992,22 +996,25 @@ void JointTrajGeneratorRML::updateHook()
     // Sample the trajectory as it stands if the tolerances have not been violated
     if(tolerances_violated)
     {
-      traj_mode_ = ABORTING;
       RTT::log(RTT::Warning) << "JointTrajGeneratorRML: Tolerances violated, aborting trajectory." << RTT::endlog();
+      traj_mode_ = ABORTING;
     }
     else
     {
       // Read the command inputs
       bool continue_traj = this->readCommands(rtt_now);
 
+
+      RTT::os::MutexTryLock gh_lock(gh_mutex_);
+
       // Handle actionlib goal
-      if(current_gh_.isValid())
+      if(gh_lock.isSuccessful() && current_gh_.isValid())
       {
         switch(current_gh_.getGoalStatus().status) {
           case actionlib_msgs::GoalStatus::PENDING:
             {
               // Update the trajectory
-              RTT::log(RTT::Debug) << "New trajectory action goal." <<RTT::endlog();
+              RTT::log(RTT::Info) << "New trajectory action goal." <<RTT::endlog();
 
               // Reset the segment counter
               gh_segments_required_ = 0;
@@ -1027,7 +1034,7 @@ void JointTrajGeneratorRML::updateHook()
           case actionlib_msgs::GoalStatus::RECALLING:
           case actionlib_msgs::GoalStatus::PREEMPTING:
             {
-              RTT::log(RTT::Debug) << "Trajectory action goal has been preempted." <<RTT::endlog();
+              RTT::log(RTT::Warning) << "Trajectory action goal has been preempted." <<RTT::endlog();
               // Preempt the trajectory
               current_gh_.setCanceled();
               // Hold current position
@@ -1037,7 +1044,7 @@ void JointTrajGeneratorRML::updateHook()
           case actionlib_msgs::GoalStatus::ACTIVE:
             {
               if(segments_.empty()) {
-                RTT::log(RTT::Debug) << "Trajectory action goal has failed." <<RTT::endlog();
+                RTT::log(RTT::Warning) << "Trajectory action goal has failed." <<RTT::endlog();
                 current_gh_.setAborted();
               }
               break;
@@ -1052,13 +1059,14 @@ void JointTrajGeneratorRML::updateHook()
             current_gh_ = GoalHandle();
             break;
           default:
-            RTT::log(RTT::Warning) << "Trajectory action goal is in a bad state." <<RTT::endlog();
+            RTT::log(RTT::Error) << "Trajectory action goal is in a bad state." <<RTT::endlog();
             break;
         };
       }
 
       // Check if the trajectory should be continued
       if(!continue_traj) {
+        RTT::log(RTT::Warning) << "Trajectory won't be continued." <<RTT::endlog();
         traj_mode_ = INACTIVE;
       }
 
@@ -1330,7 +1338,9 @@ void JointTrajGeneratorRML::updateHook()
     joint_state_desired_out_.write(joint_state_desired_);
 
     // Publish action feedback
-    if(current_gh_.isValid() && current_gh_.getGoalStatus().status == actionlib_msgs::GoalStatus::ACTIVE) {
+    RTT::os::MutexTryLock gh_lock(gh_mutex_);
+
+    if(gh_lock.isSuccessful() && current_gh_.isValid() && current_gh_.getGoalStatus().status == actionlib_msgs::GoalStatus::ACTIVE) {
       feedback_.header = joint_state_desired_.header;
 
       feedback_.joint_names = joint_names_;
@@ -1412,6 +1422,8 @@ void JointTrajGeneratorRML::RMLLog(
 
 void JointTrajGeneratorRML::goalCallback(JointTrajGeneratorRML::GoalHandle gh)
 {
+  RTT::os::MutexLock gh_lock(gh_mutex_);
+
   RTT::log(RTT::Info) << "Recieved action goal." << RTT::endlog();
   if(this->getTaskState() != RTT::TaskContext::Running) {
     RTT::log(RTT::Error) << "Rejected action goal, component not running." << RTT::endlog();
@@ -1421,6 +1433,7 @@ void JointTrajGeneratorRML::goalCallback(JointTrajGeneratorRML::GoalHandle gh)
 
   // Always preempt the current goal and accept the new one
   if(current_gh_.isValid() && current_gh_.getGoalStatus().status == actionlib_msgs::GoalStatus::ACTIVE) {
+    RTT::log(RTT::Warning) << "Cancelling current goal." << RTT::endlog();
     current_gh_.setCanceled();
   }
   current_gh_ = gh;

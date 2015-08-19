@@ -46,6 +46,7 @@ IDControllerKDL::IDControllerKDL(std::string const& name) :
   ,inertia_map_()
   ,inertia_mass_rate_(0.0)
   ,inertia_com_rate_(0.0)
+  ,max_attached_mass_(0.0)
   // Throttles
   ,debug_throttle_(0.05)
   ,last_update_time_()
@@ -77,6 +78,8 @@ IDControllerKDL::IDControllerKDL(std::string const& name) :
     .doc("The maximum rate in kg/s at which mass can be added and removed from the end-effector.");
   this->addProperty("inertia_com_rate",inertia_com_rate_)
     .doc("The maximum rate in m/s at which the center of mass of the attached inertia can be moved.");
+  this->addProperty("max_attached_mass",max_attached_mass_)
+    .doc("The maximum mass that can be attached to the arm.");
 
   // Configure data ports
   this->ports()->addPort("joint_position_in", joint_position_in_);
@@ -114,6 +117,7 @@ bool IDControllerKDL::configureHook()
   rosparam->getComponentPrivate("compensate_end_effector");
   rosparam->getComponentPrivate("inertia_mass_rate");
   rosparam->getComponentPrivate("inertia_com_rate");
+  rosparam->getComponentPrivate("max_attached_mass");
 
   RTT::log(RTT::Debug) << "Initializing kinematic and dynamic parameters from \"" << root_link_ << "\" to \"" << tip_link_ <<"\"" << RTT::endlog();
 
@@ -150,6 +154,25 @@ bool IDControllerKDL::configureHook()
 
     cogs_msgs_.push_back(cog_pose);
   }
+
+  // Add ee cog marker
+  visualization_msgs::Marker cog_pose;
+  cog_pose.header.frame_id = tip_link_;
+  cog_pose.ns = "attached";
+  cog_pose.type = visualization_msgs::Marker::SPHERE;
+  cog_pose.frame_locked = true;
+  cog_pose.scale.x = 0.0;
+  cog_pose.scale.y = 0.0;
+  cog_pose.scale.z = 0.0;
+  cog_pose.color.r = 255.0/255.0;
+  cog_pose.color.g = 102.0/255.0;
+  cog_pose.color.b = 102.0/255.0;
+  cog_pose.color.a = 128.0;
+  cog_pose.pose.position.x = 0.0;
+  cog_pose.pose.position.y = 0.0;
+  cog_pose.pose.position.z = 0.0;
+
+  cogs_msgs_.push_back(cog_pose);
 
   // Create inverse dynamics chainsolver
   id_solver_.reset(
@@ -239,26 +262,46 @@ void IDControllerKDL::updateHook()
     // Update inertia map
     // Make sure the new mass is well-posed
     if(inertia_map_.update(end_effector_inertia_)) {
-      if(end_effector_inertia_.action == telemanip_msgs::AttachedInertia::UPDATE) {
-        RTT::log(RTT::Debug) <<"Updated EE inertia: "<<end_effector_inertia_.ns<< " #" <<end_effector_inertia_.id<<RTT::endlog();
-      } else {
-        RTT::log(RTT::Debug) <<"Deleted EE inertia: "<<end_effector_inertia_.ns<< " #" <<end_effector_inertia_.id<<RTT::endlog();
-      }
+      switch(end_effector_inertia_.action) {
+        case telemanip_msgs::AttachedInertia::UPDATE:
+          RTT::log(RTT::Debug) <<"Updated EE inertia: "<<end_effector_inertia_.ns<< " #" <<end_effector_inertia_.id<<" @ "<<end_effector_inertia_.inertia.m<<" kg"<<RTT::endlog();
+          break;
+        case telemanip_msgs::AttachedInertia::DELETE:
+          RTT::log(RTT::Debug) <<"Deleted EE inertia: "<<end_effector_inertia_.ns<< " #" <<end_effector_inertia_.id<<RTT::endlog();
+          break;
+      };
     } else {
-      if(end_effector_inertia_.action == telemanip_msgs::AttachedInertia::UPDATE) {
-        RTT::log(RTT::Warning) <<"Not updating attached inertia "
-          <<end_effector_inertia_.ns <<" #" <<end_effector_inertia_.id
-          <<" because it is not well-posed: "
-          <<end_effector_inertia_.inertia.m <<RTT::endlog();
-      } else {
-        RTT::log(RTT::Warning) <<"Not removing inertia "
-          <<end_effector_inertia_.ns <<" #" <<end_effector_inertia_.id
-          <<" because it is not currently attached."<<RTT::endlog();
-      }
+      switch(end_effector_inertia_.action) {
+        case telemanip_msgs::AttachedInertia::UPDATE:
+          RTT::log(RTT::Debug) <<"Not updating attached inertia "
+            <<end_effector_inertia_.ns <<" #" <<end_effector_inertia_.id
+            <<" because it is not well-posed: "
+            <<end_effector_inertia_.inertia.m <<RTT::endlog();
+          break;
+        case telemanip_msgs::AttachedInertia::DELETE:
+          RTT::log(RTT::Warning) <<"Not removing inertia "
+            <<end_effector_inertia_.ns <<" #" <<end_effector_inertia_.id
+            <<" because it is not currently attached."<<RTT::endlog();
+          break;
+        default:
+          RTT::log(RTT::Error) << "Unknown attached inertia action: "<<end_effector_inertia_.action<<RTT::endlog();
+          break;
+      };
     }
   }
 
-  KDL::RigidBodyInertia inertia_sum = inertia_map_.sum();
+  // Attached cogs
+  KDL::RigidBodyInertia inertia_sum;
+  bool load_ok = inertia_map_.sum(inertia_sum, max_attached_mass_);
+
+  // Marker message
+  visualization_msgs::Marker &attached_inertia = cogs_msgs_[cogs_msgs_.size()-1];
+  attached_inertia.scale.x = inertia_sum.getMass() / 100.0;
+  attached_inertia.scale.z = inertia_sum.getMass() / 100.0;
+  attached_inertia.scale.y = inertia_sum.getMass() / 100.0;
+  attached_inertia.pose.position.x = inertia_sum.getCOG()[0];
+  attached_inertia.pose.position.y = inertia_sum.getCOG()[1];
+  attached_inertia.pose.position.z = inertia_sum.getCOG()[2];
 
   // Interpolate total attached inertia
   interpolate_inertia(
@@ -326,6 +369,11 @@ void IDControllerKDL::updateHook()
 
     // Debug visualization
     if(this->debug_throttle_.ready(0.05)) {
+  
+      if(!load_ok) {
+        RTT::log(RTT::Warning) << "Attached inertia is overloading the controller." <<RTT::endlog();
+      }
+
       wrench_msg_.header.frame_id = tip_link_;
       wrench_msg_.header.stamp = rtt_rosclock::host_now();
       wrench_msg_.wrench.force.x = ext_wrenches_.back().force.x();

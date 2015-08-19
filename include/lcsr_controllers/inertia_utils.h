@@ -51,7 +51,7 @@ namespace lcsr_controllers {
         const size_t id);
 
     //! Sum all of the inertias
-    KDL::RigidBodyInertia sum() const;
+    bool sum(KDL::RigidBodyInertia &total_inertia, double max=0.0) const;
 
   private:
 

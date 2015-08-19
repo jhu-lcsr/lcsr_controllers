@@ -49,25 +49,29 @@ namespace lcsr_controllers {
   {
     switch(attached_inertia.action) {
       case telemanip_msgs::AttachedInertia::UPDATE:
-        return set_attached_inertia(
-            inertiaMsgToKDL(attached_inertia.inertia),
-            attached_inertia.ns,
-            attached_inertia.id);
+        if(set_attached_inertia(
+                inertiaMsgToKDL(attached_inertia.inertia),
+                attached_inertia.ns,
+                attached_inertia.id))
+        {
+          return true;
+        } else {
+          return del_attached_inertia(
+              attached_inertia.ns,
+              attached_inertia.id);
+        }
       case telemanip_msgs::AttachedInertia::DELETE:
         return del_attached_inertia(
             attached_inertia.ns,
             attached_inertia.id);
-        break;
     };
 
     return false;
   }
 
   //! Sum all of the inertias
-  KDL::RigidBodyInertia AttachedInertiaMap::sum() const
+  bool AttachedInertiaMap::sum(KDL::RigidBodyInertia &total_inertia, double max) const
   {
-    KDL::RigidBodyInertia total_inertia;
-
     // iterate over ns
     for(ns_map_t_::const_iterator ns_it = inertias_.begin();
         ns_it != inertias_.end();
@@ -79,11 +83,15 @@ namespace lcsr_controllers {
           ++id_it)
       {
         // add to total
-        total_inertia = total_inertia + id_it->second;
+        if(total_inertia.getMass() + id_it->second.getMass() < max) {
+          total_inertia = total_inertia + id_it->second;
+        } else {
+          return false;
+        }
       }
     }
 
-    return total_inertia;
+    return true;
   }
 
   bool AttachedInertiaMap::set_attached_inertia(
@@ -161,9 +169,9 @@ namespace lcsr_controllers {
     id_map.erase(id_it);
 
     // Remove ns if necessary
-    if(ns_it->second.empty()) {
-      inertias_.erase(ns_it);
-    }
+    //if(ns_it->second.empty()) {
+      //inertias_.erase(ns_it);
+    //}
 
     return true;
   }
