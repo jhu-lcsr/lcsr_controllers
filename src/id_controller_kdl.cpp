@@ -273,10 +273,12 @@ void IDControllerKDL::updateHook()
     } else {
       switch(end_effector_inertia_.action) {
         case telemanip_msgs::AttachedInertia::UPDATE:
-          RTT::log(RTT::Debug) <<"Not updating attached inertia "
-            <<end_effector_inertia_.ns <<" #" <<end_effector_inertia_.id
-            <<" because it is not well-posed: "
-            <<end_effector_inertia_.inertia.m <<RTT::endlog();
+          if(end_effector_inertia_.inertia.m != 0.0) {
+            RTT::log(RTT::Debug) <<"Not updating attached inertia "
+              <<end_effector_inertia_.ns <<" #" <<end_effector_inertia_.id
+              <<" because it is not well-posed: "
+              <<end_effector_inertia_.inertia.m <<RTT::endlog();
+          }
           break;
         case telemanip_msgs::AttachedInertia::DELETE:
           RTT::log(RTT::Warning) <<"Not removing inertia "
@@ -371,7 +373,7 @@ void IDControllerKDL::updateHook()
     if(this->debug_throttle_.ready(0.05)) {
   
       if(!load_ok) {
-        RTT::log(RTT::Warning) << "Attached inertia is overloading the controller." <<RTT::endlog();
+        RTT::log(RTT::Debug) << "Attached inertia is overloading the controller." <<RTT::endlog();
       }
 
       wrench_msg_.header.frame_id = tip_link_;
