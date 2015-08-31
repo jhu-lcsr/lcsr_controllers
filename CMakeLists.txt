@@ -13,12 +13,12 @@ find_package(catkin REQUIRED
   geometry_msgs
   control_msgs
   control_toolbox
-  reflexxes_type2
+  #reflexxes_type2
   telemanip_msgs
   cmake_modules)
 
 find_package(orocos_kdl REQUIRED)
-find_package(Eigen REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 # Generate ROS messages
 add_message_files(FILES
@@ -61,9 +61,13 @@ orocos_component(${PROJECT_NAME}
   src/semi_absolute_calibration_controller.cpp
   )
 
+find_library(REFLEXXES_LIBRARY ReflexxesTypeII)
+
 set(COMPONENT_LIBS
   ${orocos_kdl_LIBRARIES}
-  ${catkin_LIBRARIES})
+  ${catkin_LIBRARIES}
+  ${REFLEXXES_LIBRARY}
+ )
 
 target_link_libraries( ${PROJECT_NAME} ${COMPONENT_LIBS} lcsr_controllers_friction lcsr_controllers_inertia_utils)
 

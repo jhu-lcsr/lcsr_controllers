@@ -4,6 +4,7 @@
 
 #include <Eigen/Dense>
 
+#include <kdl/frames_io.hpp>
 #include <kdl/tree.hpp>
 
 #include <kdl_parser/kdl_parser.hpp>

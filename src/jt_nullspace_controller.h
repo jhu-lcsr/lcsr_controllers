@@ -53,6 +53,9 @@ namespace lcsr_controllers {
     RTT::InputPort<geometry_msgs::PoseStamped> pose_desired_in_;
     RTT::OutputPort<geometry_msgs::PoseStamped> err_pose_debug_out_;
     RTT::OutputPort<geometry_msgs::WrenchStamped> err_wrench_debug_out_;
+    RTT::OutputPort<geometry_msgs::WrenchStamped> p_err_wrench_debug_out_;
+    RTT::OutputPort<geometry_msgs::WrenchStamped> d_err_wrench_debug_out_;
+    RTT::OutputPort<geometry_msgs::WrenchStamped> twist_debug_out_;
     RTT::OutputPort<sensor_msgs::JointState> effort_debug_out_;
 
   public:
@@ -127,6 +130,8 @@ namespace lcsr_controllers {
     Eigen::VectorXd 
       joint_position_,
       joint_velocity_,
+      p_wrench_,
+      d_wrench_,
       wrench_,
       twist_,
       joint_effort_,
