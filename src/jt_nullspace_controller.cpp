@@ -403,6 +403,7 @@ void JTNullspaceController::updateHook()
       tic = ts->getTicks();
 
       // Compute joint-space inertia matrix
+      // TODO: Include end-effector masses
       if(projector_type_ > 1) {
         if(chain_dynamics_->JntToMass(posvel_.q, joint_inertia_) != 0) {
           RTT::log(RTT::Error) << "Could not compute joint space inertia." << RTT::endlog();

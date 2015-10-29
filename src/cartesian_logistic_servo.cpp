@@ -252,7 +252,6 @@ static inline bool isnan(geometry_msgs::TransformStamped &T) {
 
 void CartesianLogisticServo::updateHook()
 {
-  // Compute the inverse kinematics solution
   update_time_ = rtt_rosclock::rtt_now();
   ros::Duration period = update_time_ - last_update_time_;
   last_update_time_ = update_time_;

@@ -235,7 +235,6 @@ void IDControllerKDL::updateHook()
   bool new_vel_data = joint_velocity_in_.readNewest( joint_velocity_ ) == RTT::NewData;
 
   KDL::RigidBodyInertia ee_mass;
-  bool new_ee_mass = false;
 
   if(end_effector_masses_in_.readNewest( end_effector_mass_ ) == RTT::NewData) 
   {
@@ -252,8 +251,6 @@ void IDControllerKDL::updateHook()
       if(!inertia_map_.set_attached_inertia(ee_mass, "__ee__", 0)) {
         RTT::log(RTT::Error) << "End-effector inertia is not well-posed." << RTT::endlog();
       }
-
-      new_ee_mass = true;
     }
   }
 
