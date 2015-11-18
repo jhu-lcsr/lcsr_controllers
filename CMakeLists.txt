@@ -86,15 +86,15 @@ orocos_generate_package(
 #############
 
 ## Add gtest based cpp test target and link libraries
-if (CATKIN_ENABLE_TESTING)
-  find_library(GMOCK_LIBRARY NAMES gmock)
-
-  catkin_add_gtest(test_joint_trajectory_generator_rml src/joint_traj_generator_rml/tests.cpp)
-  target_link_libraries(test_joint_trajectory_generator_rml 
-    lcsr_controllers 
-    ${catkin_LIBRARIES} 
-    ${GMOCK_LIBRARY}
-    ${USE_OROCOS_LIBRARIES})
-
-endif()
+#if (CATKIN_ENABLE_TESTING)
+#  find_library(GMOCK_LIBRARY NAMES gmock)
+#
+#  catkin_add_gtest(test_joint_trajectory_generator_rml src/joint_traj_generator_rml/tests.cpp)
+#  target_link_libraries(test_joint_trajectory_generator_rml 
+#    lcsr_controllers 
+#    ${catkin_LIBRARIES} 
+#    ${GMOCK_LIBRARY}
+#    ${USE_OROCOS_LIBRARIES})
+#
+#endif()
 
