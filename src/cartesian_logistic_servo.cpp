@@ -8,6 +8,7 @@
 
 #include <kdl_parser/kdl_parser.hpp>
 #include <ocl/Component.hpp>
+#include <rtt/internal/GlobalEngine.hpp>
 
 #include <rtt_rosparam/rosparam.h>
 #include <rtt_rosclock/rtt_rosclock.h>
@@ -97,6 +98,8 @@ bool CartesianLogisticServo::configureHook()
     TaskContext* tf_task = this->getPeer("tf");
     tf_lookup_transform_ = tf_task->getOperation("lookupTransform"); // void reset(void)
     tf_broadcast_transform_ = tf_task->getOperation("broadcastTransform"); // void reset(void)
+    tf_lookup_transform_.setCaller(RTT::internal::GlobalEngine::Instance());
+    tf_broadcast_transform_.setCaller(RTT::internal::GlobalEngine::Instance());
 
     if(!tf_lookup_transform_.ready()) {
       RTT::log(RTT::Error) << "Could not get operation `lookupTransform`" << RTT::endlog();
@@ -292,7 +295,7 @@ void CartesianLogisticServo::updateHook()
         "\" to \""<<target_frame_<<"\": "<<ex.what() << RTT::endlog();
       warn_flag_ = true;
     }
-    return;
+    tip_frame_des_ = tip_framevel_cur_.GetFrame();
   }
 
   // Get the twist from the unthrottled pose to the desired pose
