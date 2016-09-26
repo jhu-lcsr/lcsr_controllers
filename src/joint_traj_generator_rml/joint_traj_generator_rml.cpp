@@ -1178,6 +1178,30 @@ void JointTrajGeneratorRML::updateHook()
     case FOLLOWING:
       // Sample the active trajectory with tolerance checking
       {
+        // Sample current trajectory as computed above
+        try {
+          bool segment_complete = this->sampleTrajectory(
+              rtt_now,
+              last_segment_start_time_,
+              rml_, rml_out_,
+              joint_position_sample_,
+              joint_velocity_sample_,
+              joint_acceleration_sample_);
+
+          // Pop the segment if it's complete
+          if(!segments_.empty() && segment_complete) {
+            if(verbose_) RTT::log(RTT::Debug) << "Removing active segment ("<<segments_.begin()->id<<") because it is complete."<<RTT::endlog();
+            segments_.begin()->achieved = true;
+            segments_.pop_front();
+          }
+
+        } catch (std::runtime_error &err) {
+          // Handle the error in a nice way
+          RMLLog(RTT::Error, rml_in_);
+          this->handleSampleError(err);
+          return;
+        }
+
         // The trajectory needs to be recomputed whenever the front segment changes
         bool recompute_trajectory = true;
 
@@ -1237,30 +1261,6 @@ void JointTrajGeneratorRML::updateHook()
             // Store the last segment start time
             last_segment_start_time_ = segments_.begin()->start_time;
           }
-        }
-
-        // Sample current trajectory as computed above
-        try {
-          bool segment_complete = this->sampleTrajectory(
-              rtt_now,
-              last_segment_start_time_,
-              rml_, rml_out_,
-              joint_position_sample_,
-              joint_velocity_sample_,
-              joint_acceleration_sample_);
-
-          // Pop the segment if it's complete
-          if(!segments_.empty() && segment_complete) {
-            if(verbose_) RTT::log(RTT::Debug) << "Removing active segment ("<<segments_.begin()->id<<") because it is complete."<<RTT::endlog();
-            segments_.begin()->achieved = true;
-            segments_.pop_front();
-          }
-
-        } catch (std::runtime_error &err) {
-          // Handle the error in a nice way
-          RMLLog(RTT::Error, rml_in_);
-          this->handleSampleError(err);
-          return;
         }
 
         break;
